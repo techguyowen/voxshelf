@@ -4,9 +4,9 @@
   "private": true,
   "description": "VocalFlow - self-hostable text-to-speech app powered by Gemini speech generation",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 38492",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 38492",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

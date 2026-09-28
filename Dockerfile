@@ -23,7 +23,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
   NEXT_TELEMETRY_DISABLED=1 \
   DATA_DIR=/app/data \
-  PORT=3000 \
+  PORT=38492 \
   HOSTNAME=0.0.0.0
 
 RUN addgroup --system --gid 1001 nodejs \
@@ -36,6 +36,6 @@ COPY --from=builder /app/public ./public
 RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
 USER nextjs
 
-EXPOSE 3000
+EXPOSE 38492
 VOLUME /app/data
 CMD ["node", "server.js"]

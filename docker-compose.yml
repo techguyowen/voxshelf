@@ -4,8 +4,9 @@ services:
     image: vocalflow:latest
     container_name: vocalflow
     ports:
-      - "3000:3000"
+      - "38492:38492"
     environment:
+      - PORT=38492
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_TTS_MODEL=${GEMINI_TTS_MODEL:-gemini-3.1-flash-tts-preview}
       - GEMINI_TEXT_MODEL=${GEMINI_TEXT_MODEL:-gemini-2.5-flash}

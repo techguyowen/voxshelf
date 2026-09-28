@@ -59,7 +59,7 @@ cp .env.example .env   # then add your GEMINI_API_KEY
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in a browser. On first run
+Open [http://localhost:38492](http://localhost:38492) in a browser. On first run
 a `./data` directory is created holding `vocalflow.db` (SQLite) and the
 `audio/` cache.
 
@@ -81,7 +81,7 @@ export GEMINI_API_KEY=AIza…   # or create a .env file with it
 docker compose up --build -d
 ```
 
-Then open [http://localhost:3000](http://localhost:3000). Library data and the
+Then open [http://localhost:38492](http://localhost:38492). Library data and the
 audio cache persist in the local `./data` volume. To update:
 
 ```bash
@@ -97,7 +97,7 @@ docker compose up --build -d
 | `GEMINI_TEXT_MODEL`  | `gemini-2.5-flash`               | Summary/explain/OCR/vision model (in-app too)  |
 | `DATA_DIR`           | `./data` (`/app/data` in Docker) | SQLite db + audio cache location               |
 | `DB_PATH`            | `$DATA_DIR/vocalflow.db`         | SQLite file path                               |
-| `PORT`               | `3000`                           | HTTP port                                      |
+| `PORT`               | `38492`                          | HTTP port                                      |
 
 Model names are configurable because Google iterates on preview model IDs —
 if a default stops resolving, point it at the current preview model in
