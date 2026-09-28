@@ -61,6 +61,24 @@ export interface VoiceInfo {
   description: string;
 }
 
+export interface ModelInfo {
+  id: string;
+  name: string;
+  description?: string;
+  isRecommended?: boolean;
+  category: "tts" | "text" | "vision";
+  speed?: "fast" | "standard";
+}
+
+export interface ModelsResponse {
+  ttsModels: ModelInfo[];
+  textModels: ModelInfo[];
+  /** True when the lists came from a live `ai.models.list()` call. */
+  live: boolean;
+  /** Present when live discovery failed and curated defaults were returned. */
+  error?: string;
+}
+
 export interface TtsRequest {
   text: string;
   voice?: string;

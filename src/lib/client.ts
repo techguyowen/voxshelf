@@ -7,6 +7,7 @@ import type {
   DocumentDetail,
   DocumentSummary,
   ExtractResult,
+  ModelsResponse,
   OcrResult,
   PodcastEpisode,
   PublicSettings,
@@ -136,6 +137,10 @@ export const api = {
     send<{ ok: boolean }>(`/api/documents/${docId}/bookmarks/${bookmarkId}`, "DELETE"),
 
   voices: () => get<{ voices: VoiceInfo[]; default: string }>("/api/voices"),
+  models: (key?: string) =>
+    get<ModelsResponse>(
+      `/api/models${key?.trim() ? `?key=${encodeURIComponent(key.trim())}` : ""}`,
+    ),
   settings: () => get<PublicSettings>("/api/settings"),
   updateSettings: (patch: Record<string, unknown>) =>
     send<PublicSettings>("/api/settings", "PUT", patch),
