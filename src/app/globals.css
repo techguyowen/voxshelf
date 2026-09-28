@@ -52,13 +52,24 @@ body {
 }
 
 .vf-word {
-  border-radius: 0.2rem;
-  padding: 0 0.05em;
+  border-radius: 0.25rem;
+  padding: 0.05em 0.15em;
+  margin: 0 -0.05em;
+  transition: background-color 0.08s ease, color 0.08s ease, box-shadow 0.08s ease;
 }
 
 .vf-word-active {
-  background-color: rgb(250 204 21 / 0.95);
-  color: #18181b;
+  background-color: #facc15 !important;
+  color: #09090b !important;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.45);
+}
+
+.dark .vf-word-active {
+  background-color: #fbbf24 !important;
+  color: #09090b !important;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.5);
 }
 
 /* Reading ruler / focus-line mode */

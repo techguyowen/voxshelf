@@ -18,6 +18,95 @@ function clampSpeed(v: number): number {
   return Math.min(4.5, Math.max(0.5, v));
 }
 
+interface WordTiming {
+  index: number;
+  word: string;
+  startFrac: number;
+  endFrac: number;
+}
+
+const wordTimingCache = new Map<string, WordTiming[]>();
+
+function getSentenceWordTimings(text: string): WordTiming[] {
+  const cached = wordTimingCache.get(text);
+  if (cached) return cached;
+
+  const parts = text.split(/(\s+)/);
+  const words: string[] = [];
+  parts.forEach((p) => {
+    if (p !== "" && !/^\s+$/.test(p)) {
+      words.push(p);
+    }
+  });
+
+  if (words.length === 0) return [];
+
+  // Syllable, number, and punctuation aware weights
+  const weights: number[] = words.map((w) => {
+    const cleanWord = w.replace(/[^\p{L}\p{N}]/gu, "");
+    let weight = Math.max(1.4, cleanWord.length);
+
+    // Vowel count heuristic for syllable length
+    const vowelCount = (cleanWord.match(/[aeiouyáéíóúäëïöü]/gi) || []).length;
+    weight += vowelCount * 0.4;
+
+    // Numbers take longer to speak aloud
+    if (/\d+/.test(cleanWord)) {
+      weight += cleanWord.length * 1.5;
+    }
+
+    // Punctuation pauses
+    if (/[,;:]$/.test(w)) weight += 2.2;
+    else if (/[.!?]$/.test(w)) weight += 3.2;
+    else if (/[-—–]$/.test(w)) weight += 1.8;
+
+    return weight;
+  });
+
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  if (totalWeight <= 0) return [];
+
+  let accum = 0;
+  const timings: WordTiming[] = words.map((word, index) => {
+    const startFrac = accum / totalWeight;
+    accum += weights[index];
+    const endFrac = accum / totalWeight;
+    return { index, word, startFrac, endFrac };
+  });
+
+  if (wordTimingCache.size > 2000) wordTimingCache.clear();
+  wordTimingCache.set(text, timings);
+  return timings;
+}
+
+export function computeActiveWordIndex(
+  text: string,
+  currentTime: number,
+  duration: number,
+): number {
+  if (!text || !Number.isFinite(duration) || duration <= 0) return -1;
+  const timings = getSentenceWordTimings(text);
+  if (timings.length === 0) return -1;
+  if (timings.length === 1) return 0;
+
+  // Acoustic lead-in and tail margins
+  const leadIn = Math.min(0.08, duration * 0.03);
+  const tailMargin = Math.min(0.18, duration * 0.05);
+  const speechDur = Math.max(0.1, duration - leadIn - tailMargin);
+
+  if (currentTime < leadIn) return 0;
+  if (currentTime >= duration - tailMargin) return timings.length - 1;
+
+  const frac = Math.min(1, Math.max(0, (currentTime - leadIn) / speechDur));
+
+  for (let i = 0; i < timings.length; i++) {
+    if (frac >= timings[i].startFrac && frac < timings[i].endFrac) {
+      return timings[i].index;
+    }
+  }
+  return timings.length - 1;
+}
+
 /**
  * Sentence-chained audio engine. Each sentence is synthesized (or cache-hit)
  * via /api/tts on demand, played through a single HTMLAudioElement, and the
@@ -49,6 +138,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const onProgressRef = useRef(opts.onProgress);
   const sleepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   docRef.current = doc;
   statusRef.current = status;
@@ -378,37 +468,65 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         clearSleep();
       }
     };
-    const onTimeUpdate = () => {
+    const updateProgress = () => {
+      if (!audio) return;
       const dur = audio.duration;
       if (!Number.isFinite(dur) || dur <= 0) return;
-      const frac = Math.min(1, Math.max(0, audio.currentTime / dur));
+      const cur = audio.currentTime;
+      const frac = Math.min(1, Math.max(0, cur / dur));
       setClipProgress(frac);
+
       const d = docRef.current;
-      const words = d?.sentences[currentIdxRef.current]?.text.split(/\s+/).length ?? 0;
-      setCurrentWord(words > 0 ? Math.min(words - 1, Math.floor(frac * words)) : -1);
+      const sentenceText = d?.sentences[currentIdxRef.current]?.text ?? "";
+      const wordIdx = computeActiveWordIndex(sentenceText, cur, dur);
+      setCurrentWord(wordIdx);
+    };
+
+    const tick = () => {
+      updateProgress();
+      if (audio && !audio.paused && !audio.ended) {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    const onTimeUpdate = () => {
+      updateProgress();
       try {
-        if ("mediaSession" in navigator && Number.isFinite(audio.currentTime)) {
+        if ("mediaSession" in navigator && Number.isFinite(audio.currentTime) && Number.isFinite(audio.duration)) {
           navigator.mediaSession.setPositionState({
-            duration: dur,
+            duration: audio.duration,
             playbackRate: audio.playbackRate,
-            position: Math.min(audio.currentTime, dur),
+            position: Math.min(audio.currentTime, audio.duration),
           });
         }
       } catch {
         // setPositionState throws when no metadata is set; ignore.
       }
     };
+
     const onPlay = () => {
       if (statusRef.current !== "loading") setStatus("playing");
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(tick);
     };
+
+    const onPause = () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      updateProgress();
+    };
+
     audio.addEventListener("ended", onEnded);
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+
     return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
       audio.pause();
       audio.removeEventListener("ended", onEnded);
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
       audioRef.current = null;
     };
   }, [goTo, reportProgress, clearSleep]);
