@@ -23,14 +23,14 @@ reading assistant.
   scan, Google Docs links, web articles (Readability), quick paste.
 - **OCR two ways**: on-device Tesseract.js or Gemini Vision, with AI cleanup
   for scan artifacts.
-- **AI assistant drawer**: one-click document summary (short/detailed) and a
-  vocabulary explainer for any selected text.
-- **Persistent library**: SQLite storage for documents, sentences, reading
-  progress, bookmarks, settings and the audio-cache index; grid/list views,
-  search, tags, archive, per-document export.
-- **Disk audio cache**: every sentence is synthesized once and reused forever
-  (content-hashed by text + voice + style).
-- **Dark / light mode**, self-hostable with Docker.
+- **In-Context AI Document Chat**: Multi-turn "Ask AI" drawer grounded in the document, with quick-prompt chips and 1-click spoken TTS answers.
+- **AI Quiz & Active Recall Flashcards**: 1-click generation of interactive multiple-choice practice quizzes (with live scoring) and flip-cards.
+- **AI Multi-Voice Podcast Generator**: Converts any document or chapter into a lively 2-host conversational podcast (Alex & Sam) synthesized with Gemini TTS into a stitched episode.
+- **Voice Dictation & AI Cleanup**: Live microphone speech-to-text recording with automated filler-word removal and punctuation formatting.
+- **AI Assistant Drawer**: One-click document summary (short/detailed) and vocabulary explainer for any selected text.
+- **Persistent Library**: SQLite storage for documents, sentences, reading progress, bookmarks, podcasts, settings and the audio-cache index; grid/list views, search, tags, archive, per-document export.
+- **Disk Audio Cache**: Every sentence is synthesized once and reused forever (content-hashed by text + voice + style).
+- **Dark / Light mode**, self-hostable with Docker on port 38492.
 
 ## Screenshots (what you’ll see)
 
