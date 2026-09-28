@@ -8,14 +8,21 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const RECOMMENDED_TTS = "gemini-3.1-flash-tts-preview";
-const RECOMMENDED_TEXT = "gemini-2.5-flash";
+const RECOMMENDED_TEXT = "gemini-3.8-flash";
 
 const TTS_PRESETS: ModelInfo[] = [
   {
     id: "gemini-3.1-flash-tts-preview",
     name: "Gemini 3.1 Flash TTS",
-    description: "Recommended TTS model — fast, natural narration voices.",
+    description: "Recommended TTS model — fast, natural narration voices with promptable tone.",
     isRecommended: true,
+    category: "tts",
+    speed: "fast",
+  },
+  {
+    id: "gemini-3.8-flash-tts-preview",
+    name: "Gemini 3.8 Flash TTS Preview",
+    description: "Latest 3.8 generation Flash TTS preview model.",
     category: "tts",
     speed: "fast",
   },
@@ -30,26 +37,40 @@ const TTS_PRESETS: ModelInfo[] = [
 
 const TEXT_PRESETS: ModelInfo[] = [
   {
+    id: "gemini-3.8-flash",
+    name: "Gemini 3.8 Flash",
+    description: "Flagship 3.8 Flash model — ultra-fast intelligence, OCR, long-horizon text and agentic tasks.",
+    isRecommended: true,
+    category: "text",
+    speed: "fast",
+  },
+  {
+    id: "gemini-3.8-pro",
+    name: "Gemini 3.8 Pro",
+    description: "High intelligence 3.8 Pro — deep reasoning and advanced analysis.",
+    category: "text",
+    speed: "standard",
+  },
+  {
+    id: "gemini-3.7-flash",
+    name: "Gemini 3.7 Flash",
+    description: "High performance 3.7 Flash model.",
+    category: "text",
+    speed: "fast",
+  },
+  {
     id: "gemini-2.5-flash",
     name: "Gemini 2.5 Flash",
-    description: "Recommended — fast all-rounder for summaries, chat and cleanup.",
-    isRecommended: true,
+    description: "Fast all-rounder for summaries, chat, vision OCR and cleanup.",
     category: "text",
     speed: "fast",
   },
   {
     id: "gemini-2.5-pro",
     name: "Gemini 2.5 Pro",
-    description: "High intelligence — best quality for long documents and quizzes.",
+    description: "High intelligence for long documents and complex quizzes.",
     category: "text",
     speed: "standard",
-  },
-  {
-    id: "gemini-2.0-flash",
-    name: "Gemini 2.0 Flash",
-    description: "Previous-generation fast multimodal model.",
-    category: "text",
-    speed: "fast",
   },
   {
     id: "gemini-1.5-flash",
@@ -57,13 +78,6 @@ const TEXT_PRESETS: ModelInfo[] = [
     description: "Mature fast model with a large context window.",
     category: "text",
     speed: "fast",
-  },
-  {
-    id: "gemini-1.5-pro",
-    name: "Gemini 1.5 Pro",
-    description: "Mature high-quality model for demanding tasks.",
-    category: "text",
-    speed: "standard",
   },
 ];
 

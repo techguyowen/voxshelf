@@ -2,6 +2,7 @@ import { existsSync, readdirSync, unlinkSync, writeFileSync } from "fs";
 import { AUDIO_DIR, ensureDirs } from "./paths";
 import { audioFilePath } from "./audio";
 import { dbAll, dbGet, dbRun } from "./db";
+import { estimateTtsCostUsd } from "./pricing";
 import type { CacheStats } from "./types";
 
 export interface CachedAudio {
@@ -98,8 +99,16 @@ export function saveCachedAudio(entry: {
 }
 
 export function cacheStats(): CacheStats {
-  const row = dbGet<{ entries: number; bytes: number }>(
-    "SELECT COUNT(*) AS entries, COALESCE(SUM(bytes), 0) AS bytes FROM audio_cache",
+  const row = dbGet<{
+    entries: number;
+    bytes: number;
+    chars: number;
+    servedChars: number;
+  }>(
+    `SELECT COUNT(*) AS entries, COALESCE(SUM(bytes), 0) AS bytes,
+            COALESCE(SUM(chars), 0) AS chars,
+            COALESCE(SUM(chars * use_count), 0) AS servedChars
+     FROM audio_cache`,
   );
   let files = 0;
   try {
@@ -107,11 +116,21 @@ export function cacheStats(): CacheStats {
   } catch {
     files = 0;
   }
+  const chars = row?.chars ?? 0;
+  const servedChars = row?.servedChars ?? 0;
+  // Every cached clip was synthesized once (cost); every repeat play skipped
+  // a billable API call (savings).
+  const estimatedCostUsd = estimateTtsCostUsd(chars);
+  const estimatedSavedUsd = estimateTtsCostUsd(Math.max(0, servedChars - chars));
   return {
     entries: row?.entries ?? 0,
     bytes: row?.bytes ?? 0,
     files,
     audioDir: AUDIO_DIR,
+    chars,
+    servedChars,
+    estimatedCostUsd,
+    estimatedSavedUsd,
   };
 }
 

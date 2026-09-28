@@ -3,7 +3,7 @@ import type { PublicSettings } from "./types";
 import { DEFAULT_VOICE, isValidVoice } from "./voices";
 
 export const DEFAULT_TTS_MODEL = "gemini-3.1-flash-tts-preview";
-export const DEFAULT_TEXT_MODEL = "gemini-2.5-flash";
+export const DEFAULT_TEXT_MODEL = "gemini-3.8-flash";
 
 export function getSetting(key: string, fallback = ""): string {
   try {

@@ -9,6 +9,12 @@ export const metadata: Metadata = {
     "VocalFlow is a self-hostable text-to-speech app. Import PDFs, articles, scans and docs, then listen with karaoke-style highlighting.",
   applicationName: "VocalFlow",
   icons: { icon: "/favicon.svg" },
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "VocalFlow",
+  },
 };
 
 export const viewport: Viewport = {

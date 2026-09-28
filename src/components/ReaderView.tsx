@@ -4,9 +4,11 @@ import {
   ArrowLeft,
   BookmarkPlus,
   Focus,
+  Keyboard,
   Loader2,
   Mic,
   Sparkles,
+  Timer,
   TriangleAlert,
   Type,
 } from "lucide-react";
@@ -21,6 +23,12 @@ import {
 } from "react";
 import { usePlayer } from "@/hooks/usePlayer";
 import { api } from "@/lib/client";
+import { estimateTtsCostUsd, formatUsd } from "@/lib/pricing";
+import {
+  cumulativeWordCounts,
+  formatTimeLeftBadge,
+  wordsRemainingFrom,
+} from "@/lib/readingTime";
 import type {
   Bookmark,
   DocumentDetail,
@@ -29,6 +37,7 @@ import type {
   Sentence,
 } from "@/lib/types";
 import { AIDrawer, type TextSelection } from "./AIDrawer";
+import { useUI } from "./AppShell";
 import { PlayerBar } from "./PlayerBar";
 
 const PREFS_KEY = "vf-reader-prefs";
@@ -157,6 +166,7 @@ export function ReaderView({ docId }: { docId: string }) {
   const [selection, setSelection] = useState<TextSelection | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const articleRef = useRef<HTMLDivElement>(null);
+  const { openShortcuts, shortcutsOpen } = useUI();
 
   useEffect(() => {
     setPrefs(loadPrefs());
@@ -336,6 +346,81 @@ export function ReaderView({ docId }: { docId: string }) {
     );
   }, [doc, player.currentIdx, player.clipProgress]);
 
+  // --- Dynamic "time left" estimate (updates with sentence + speed) ---
+  const sentenceWordCum = useMemo(
+    () => cumulativeWordCounts(doc?.sentences.map((s) => s.text) ?? []),
+    [doc],
+  );
+  const wordsLeft = wordsRemainingFrom(
+    sentenceWordCum,
+    player.currentIdx,
+    player.clipProgress,
+  );
+  const timeLeftLabel = formatTimeLeftBadge(wordsLeft, player.speed);
+  const docCostUsd = doc ? estimateTtsCostUsd(doc.totalChars) : 0;
+
+  // --- Keyboard shortcuts ("?"/cheat-sheet toggle lives in AppShell) ---
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyHandlerRef.current = (e: KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Escape") {
+      if (aiOpen) setAiOpen(false);
+      else if (showFontPanel) setShowFontPanel(false);
+      return;
+    }
+    if (shortcutsOpen || !doc) return;
+    const t = e.target;
+    if (
+      t instanceof HTMLElement &&
+      (t.isContentEditable ||
+        t.tagName === "INPUT" ||
+        t.tagName === "TEXTAREA" ||
+        t.tagName === "SELECT")
+    ) {
+      return;
+    }
+    switch (e.key) {
+      case " ":
+        e.preventDefault();
+        player.toggle();
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        if (e.shiftKey) void player.skip(-15);
+        else player.prev();
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (e.shiftKey) void player.skip(15);
+        else player.next();
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        player.setSpeed(Math.round((player.speed + 0.1) * 10) / 10);
+        break;
+      case "ArrowDown":
+        e.preventDefault();
+        player.setSpeed(Math.round((player.speed - 0.1) * 10) / 10);
+        break;
+      default: {
+        // Shift+arrows handled above; ignore other shifted keys.
+        // ("?" cheat-sheet toggle lives in AppShell.)
+        if (e.shiftKey) return;
+        const k = e.key.toLowerCase();
+        if (k === "b") addBookmark("");
+        else if (k === "r")
+          setPrefs((p) => ({ ...p, rulerMode: !p.rulerMode }));
+        else if (k === "a") openAi("summary");
+        break;
+      }
+    }
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const fontCls =
     prefs.font === "serif"
       ? "font-serif"
@@ -402,7 +487,7 @@ export function ReaderView({ docId }: { docId: string }) {
           onClick={() => setPrefs((p) => ({ ...p, rulerMode: !p.rulerMode }))}
           className={`rounded-lg p-2 ${prefs.rulerMode ? "bg-amber-200 text-amber-900 dark:bg-amber-900/60 dark:text-amber-200" : "text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
           aria-label="Toggle reading ruler"
-          title="Reading ruler (focus line)"
+          title="Reading ruler (R)"
           aria-pressed={prefs.rulerMode}
         >
           <Focus size={19} />
@@ -411,7 +496,7 @@ export function ReaderView({ docId }: { docId: string }) {
           onClick={() => addBookmark("")}
           className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
           aria-label="Bookmark current sentence"
-          title="Bookmark current sentence"
+          title="Bookmark current sentence (B)"
         >
           <BookmarkPlus size={19} />
         </button>
@@ -419,9 +504,17 @@ export function ReaderView({ docId }: { docId: string }) {
           onClick={() => openAi("summary")}
           className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
           aria-label="Open AI assistant"
-          title="AI assistant"
+          title="AI assistant (A)"
         >
           <Sparkles size={19} />
+        </button>
+        <button
+          onClick={openShortcuts}
+          className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts (?)"
+        >
+          <Keyboard size={19} />
         </button>
         <button
           onClick={() => openAi("podcast")}
@@ -432,6 +525,23 @@ export function ReaderView({ docId }: { docId: string }) {
           <Mic size={15} />
           <span className="hidden sm:inline">🎙️ Podcast</span>
         </button>
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold tabular-nums text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
+          title={`${wordsLeft.toLocaleString()} words remaining · estimate at 150 wpm`}
+          aria-live="polite"
+        >
+          <Timer size={12} />
+          {timeLeftLabel}
+        </span>
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-zinc-200/70 px-2.5 py-1 text-[11px] font-medium tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+          title={`Full-document synthesis estimate for ${doc.totalChars.toLocaleString()} characters at ~$0.02 / 100k chars`}
+        >
+          Est. cost: {formatUsd(docCostUsd)} (Free tier eligible)
+        </span>
       </div>
 
       {showFontPanel && (

@@ -128,6 +128,14 @@ export interface CacheStats {
   bytes: number;
   files: number;
   audioDir: string;
+  /** Unique characters currently cached (one synthesis each). */
+  chars: number;
+  /** Total characters served from cache, including repeat plays. */
+  servedChars: number;
+  /** Estimated USD spent on the first synthesis of each clip. */
+  estimatedCostUsd: number;
+  /** Estimated USD saved by cache hits (repeat plays that skipped the API). */
+  estimatedSavedUsd: number;
 }
 
 export interface ChatMessage {

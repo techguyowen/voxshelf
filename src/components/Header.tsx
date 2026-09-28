@@ -1,6 +1,6 @@
 "use client";
 
-import { AudioLines, Moon, Plus, Settings, Sun } from "lucide-react";
+import { AudioLines, Keyboard, Moon, Plus, Settings, Sun } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/client";
@@ -9,10 +9,12 @@ import { useTheme } from "./ThemeContext";
 export function Header({
   onImport,
   onSettings,
+  onShortcuts,
   settingsRev,
 }: {
   onImport: () => void;
   onSettings: () => void;
+  onShortcuts: () => void;
   settingsRev: number;
 }) {
   const { theme, toggle } = useTheme();
@@ -87,6 +89,15 @@ export function Header({
             title={theme === "dark" ? "Light mode" : "Dark mode"}
           >
             {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
+          </button>
+
+          <button
+            onClick={onShortcuts}
+            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            <Keyboard size={19} />
           </button>
 
           <button

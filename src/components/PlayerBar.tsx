@@ -14,8 +14,13 @@ import {
   Timer,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/client";
+import {
+  cumulativeWordCounts,
+  formatTimeLeftBadge,
+  wordsRemainingFrom,
+} from "@/lib/readingTime";
 import type { DocumentDetail, VoiceInfo } from "@/lib/types";
 import type { Player } from "@/hooks/usePlayer";
 
@@ -56,6 +61,17 @@ export function PlayerBar({
       : Math.min(100, ((player.currentIdx + player.clipProgress) / total) * 100);
   const playing = player.status === "playing";
   const busy = player.status === "loading";
+
+  const sentenceWordCum = useMemo(
+    () => cumulativeWordCounts(doc.sentences.map((s) => s.text)),
+    [doc],
+  );
+  const wordsLeft = wordsRemainingFrom(
+    sentenceWordCum,
+    player.currentIdx,
+    player.clipProgress,
+  );
+  const timeLeftLabel = formatTimeLeftBadge(wordsLeft, player.speed);
 
   const iconBtn =
     "rounded-full p-2.5 text-zinc-700 hover:bg-zinc-200/70 dark:text-zinc-200 dark:hover:bg-zinc-800";
@@ -139,6 +155,13 @@ export function PlayerBar({
               {busy && player.loadingIdx !== null
                 ? `Synthesizing ${player.loadingIdx + 1}…`
                 : `Sentence ${player.currentIdx + 1} / ${total.toLocaleString()}`}
+              <span
+                className="ml-1.5 inline-flex items-center gap-0.5 font-semibold text-emerald-700 dark:text-emerald-400"
+                title={`${wordsLeft.toLocaleString()} words remaining · estimate at 150 wpm`}
+              >
+                <Timer size={11} />
+                {timeLeftLabel}
+              </span>
               {player.sleepLeft !== null && (
                 <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
                   <Timer size={11} />

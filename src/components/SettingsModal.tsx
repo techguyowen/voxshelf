@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, formatBytes } from "@/lib/client";
+import { formatChars, formatUsd } from "@/lib/pricing";
 import type {
   CacheStats,
   ModelInfo,
@@ -555,6 +556,62 @@ export function SettingsModal({
                 Clear cache
               </button>
             </div>
+          </Section>
+
+          <Section title="💰 Cost & pricing transparency">
+            <div className="space-y-2 rounded-lg border border-zinc-200 px-3 py-2.5 text-sm dark:border-zinc-800">
+              <p className="text-zinc-700 dark:text-zinc-300">
+                <strong className="font-semibold text-zinc-900 dark:text-zinc-100">
+                  Gemini Free Tier:
+                </strong>{" "}
+                free up to standard rate limits (15 RPM / 1M TPM) — plenty
+                for everyday listening.
+              </p>
+              <p className="text-zinc-700 dark:text-zinc-300">
+                <strong className="font-semibold text-zinc-900 dark:text-zinc-100">
+                  Paid Tier:
+                </strong>{" "}
+                TTS ~$0.02 per 100k characters (a full novel is only a few
+                cents!). Text/OCR ~$0.075 / 1M tokens.
+              </p>
+              <p className="text-zinc-700 dark:text-zinc-300">
+                <strong className="font-semibold text-zinc-900 dark:text-zinc-100">
+                  Comparison:
+                </strong>{" "}
+                Speechify costs $139–$249/year, while VocalFlow with Gemini is
+                essentially free or pennies per month.
+              </p>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="rounded-lg bg-zinc-100 px-2 py-2.5 dark:bg-zinc-800/70">
+                <p className="text-base font-bold tabular-nums text-zinc-900 dark:text-zinc-100">
+                  {stats ? formatChars(stats.servedChars ?? 0) : "—"}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-tight text-zinc-500 dark:text-zinc-400">
+                  chars synthesized
+                </p>
+              </div>
+              <div className="rounded-lg bg-zinc-100 px-2 py-2.5 dark:bg-zinc-800/70">
+                <p className="text-base font-bold tabular-nums text-zinc-900 dark:text-zinc-100">
+                  {stats ? formatUsd(stats.estimatedCostUsd ?? 0) : "—"}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-tight text-zinc-500 dark:text-zinc-400">
+                  est. cost spent
+                </p>
+              </div>
+              <div className="rounded-lg bg-emerald-100 px-2 py-2.5 dark:bg-emerald-950/60">
+                <p className="text-base font-bold tabular-nums text-emerald-800 dark:text-emerald-300">
+                  {stats ? formatUsd(stats.estimatedSavedUsd ?? 0) : "—"}
+                </p>
+                <p className="mt-0.5 text-[11px] leading-tight text-emerald-700 dark:text-emerald-400">
+                  saved by caching
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Every repeat play is served from your local disk cache instead of
+              a billable API call, so re-listening is always free.
+            </p>
           </Section>
 
           <Section title="Data export / import">

@@ -11,11 +11,27 @@ export class GeminiError extends Error {
 }
 
 function ttsModels(): string[] {
-  return [...new Set([getTtsModel(), "gemini-2.5-flash-preview-tts"])];
+  return [
+    ...new Set([
+      getTtsModel(),
+      "gemini-3.1-flash-tts-preview",
+      "gemini-3.8-flash-tts-preview",
+      "gemini-2.5-flash-preview-tts",
+    ]),
+  ];
 }
 
 function textModels(): string[] {
-  return [...new Set([getTextModel(), "gemini-2.5-flash", "gemini-1.5-flash"])];
+  return [
+    ...new Set([
+      getTextModel(),
+      "gemini-3.8-flash",
+      "gemini-3.7-flash",
+      "gemini-3.8-pro",
+      "gemini-2.5-flash",
+      "gemini-1.5-flash",
+    ]),
+  ];
 }
 
 function requireKey(explicit?: string | null): string {
