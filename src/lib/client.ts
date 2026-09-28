@@ -3,11 +3,14 @@
 import type {
   Bookmark,
   CacheStats,
+  ChatMessage,
   DocumentDetail,
   DocumentSummary,
   ExtractResult,
   OcrResult,
+  PodcastEpisode,
   PublicSettings,
+  QuizResult,
   TtsResponse,
   VoiceInfo,
 } from "./types";
@@ -108,7 +111,22 @@ export const api = {
     send<{ summary: string }>("/api/ai/summary", "POST", input),
   explain: (selection: string, context?: string) =>
     send<{ explanation: string }>("/api/ai/explain", "POST", { selection, context }),
-  cleanup: (text: string) => send<{ text: string }>("/api/ai/cleanup", "POST", { text }),
+  cleanup: (text: string, mode?: "extract" | "dictation") =>
+    send<{ text: string }>("/api/ai/cleanup", "POST", { text, mode }),
+  transcribe: async (file: Blob) => {
+    const form = new FormData();
+    form.append("file", file, "dictation.webm");
+    const res = await fetch("/api/ai/transcribe", { method: "POST", body: form });
+    return parse<{ text: string }>(res);
+  },
+  chat: (input: { documentId: string; messages?: ChatMessage[]; userQuestion: string }) =>
+    send<{ answer: string }>("/api/ai/chat", "POST", input),
+  quiz: (input: { documentId: string }) =>
+    send<QuizResult>("/api/ai/quiz", "POST", input),
+  podcast: (input: { documentId: string; saveAsDocument?: boolean }) =>
+    send<PodcastEpisode>("/api/ai/podcast", "POST", input),
+  listPodcasts: (docId: string) =>
+    get<{ podcasts: PodcastEpisode[] }>(`/api/ai/podcast?documentId=${encodeURIComponent(docId)}`),
 
   listBookmarks: (docId: string) =>
     get<{ bookmarks: Bookmark[] }>(`/api/documents/${docId}/bookmarks`),

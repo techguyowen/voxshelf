@@ -2,18 +2,20 @@
 
 import {
   Camera,
+  ClipboardPaste,
   FileUp,
   Globe,
   Image as ImageIcon,
   Link2,
   Loader2,
+  Mic,
   ScanLine,
   Sparkles,
-  ClipboardPaste,
+  Square,
   TriangleAlert,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/lib/client";
 import type { ExtractResult, SourceType } from "@/lib/types";
 import { countWords } from "@/lib/text";
@@ -526,12 +528,235 @@ function UrlTab({
   );
 }
 
+// Minimal Web Speech API shapes (not in TS DOM lib).
+interface SpeechRecognitionAlternative {
+  transcript: string;
+}
+interface SpeechRecognitionResultItem {
+  isFinal: boolean;
+  0: SpeechRecognitionAlternative;
+  length: number;
+}
+interface SpeechRecognitionResultEventLike {
+  resultIndex: number;
+  results: ArrayLike<SpeechRecognitionResultItem>;
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((e: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+function speechRecognitionCtor(): SpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+}
+
 function PasteTab({ onSaved }: { onSaved: (id: string) => void }) {
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
   const [tags, setTags] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recorderKind, setRecorderKind] = useState<"webspeech" | "media" | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [dictated, setDictated] = useState(false);
+  const [interim, setInterim] = useState("");
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaChunksRef = useRef<Blob[]>([]);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const baseTextRef = useRef("");
+  const stopRequestedRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      try {
+        recognitionRef.current?.stop();
+      } catch {
+        // ignore
+      }
+      try {
+        mediaRecorderRef.current?.stop();
+      } catch {
+        // ignore
+      }
+      mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+
+  function appendDictation(chunk: string) {
+    const clean = chunk.trim();
+    if (!clean) return;
+    setText((prev) => {
+      const base = prev.trimEnd();
+      if (base.endsWith(clean.slice(0, Math.min(base.length, clean.length))) && base.length > 0) {
+        return prev;
+      }
+      return base ? `${base} ${clean}` : clean;
+    });
+    setDictated(true);
+  }
+
+  async function startMediaFallback() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("Voice dictation is not supported in this browser.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : undefined;
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      mediaChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) mediaChunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        mediaStreamRef.current = null;
+        const blob = new Blob(mediaChunksRef.current, { type: recorder.mimeType || "audio/webm" });
+        if (blob.size === 0) {
+          setRecording(false);
+          setRecorderKind(null);
+          return;
+        }
+        setTranscribing(true);
+        api
+          .transcribe(blob)
+          .then((out) => {
+            if (out.text.trim()) appendDictation(out.text);
+            else setError("No speech detected in the recording.");
+          })
+          .catch((e) => setError(e instanceof Error ? e.message : "Transcription failed."))
+          .finally(() => {
+            setTranscribing(false);
+            setRecording(false);
+            setRecorderKind(null);
+          });
+      };
+      mediaRecorderRef.current = recorder;
+      stopRequestedRef.current = false;
+      recorder.start();
+      setRecorderKind("media");
+      setRecording(true);
+      setError(null);
+    } catch {
+      setError("Microphone access was denied.");
+    }
+  }
+
+  function startDictation() {
+    const Ctor = speechRecognitionCtor();
+    if (!Ctor) {
+      void startMediaFallback();
+      return;
+    }
+    try {
+      const rec = new Ctor();
+      recognitionRef.current = rec;
+      baseTextRef.current = text;
+      stopRequestedRef.current = false;
+      rec.lang = navigator.language || "en-US";
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.maxAlternatives = 1;
+      let finalSoFar = "";
+      rec.onresult = (e) => {
+        let interimText = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const res = e.results[i];
+          if (res.isFinal) finalSoFar += res[0].transcript;
+          else interimText += res[0].transcript;
+        }
+        setInterim(interimText);
+        if (finalSoFar.trim()) {
+          const base = baseTextRef.current.trimEnd();
+          setText(base ? `${base} ${finalSoFar.trim()}` : finalSoFar.trim());
+          baseTextRef.current = base ? `${base} ${finalSoFar.trim()}` : finalSoFar.trim();
+          finalSoFar = "";
+          setDictated(true);
+        }
+      };
+      rec.onerror = (e) => {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+          setError("Microphone access was denied.");
+        } else if (e.error && e.error !== "aborted" && e.error !== "no-speech") {
+          setError(`Dictation error: ${e.error}`);
+        }
+      };
+      rec.onend = () => {
+        setInterim("");
+        if (!stopRequestedRef.current && recording) {
+          // Some browsers end continuous sessions spontaneously; resume.
+          try {
+            rec.start();
+            return;
+          } catch {
+            // fall through to stopped state
+          }
+        }
+        setRecording(false);
+        setRecorderKind(null);
+      };
+      rec.start();
+      setRecorderKind("webspeech");
+      setRecording(true);
+      setError(null);
+    } catch {
+      void startMediaFallback();
+    }
+  }
+
+  function stopDictation() {
+    stopRequestedRef.current = true;
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // ignore
+    }
+    if (mediaRecorderRef.current?.state === "recording") {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch {
+        // ignore
+      }
+    } else if (recorderKind === "webspeech") {
+      setRecording(false);
+      setRecorderKind(null);
+      setInterim("");
+    }
+  }
+
+  async function cleanupDictated() {
+    if (!text.trim()) return;
+    setCleaning(true);
+    setError(null);
+    try {
+      const out = await api.cleanup(text, "dictation");
+      setText(out.text);
+      setDictated(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "AI cleanup failed.");
+    } finally {
+      setCleaning(false);
+    }
+  }
 
   async function save() {
     if (!text.trim()) {
@@ -565,12 +790,50 @@ function PasteTab({ onSaved }: { onSaved: (id: string) => void }) {
         placeholder="Title (optional — first line is used when empty)"
         aria-label="Title"
       />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => (recording ? stopDictation() : startDictation())}
+          disabled={transcribing}
+          className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium ${
+            recording
+              ? "border-red-400 bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+              : "border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          }`}
+        >
+          {recording ? <Square size={15} /> : <Mic size={15} />}
+          {recording
+            ? `Stop dictation${recorderKind === "media" ? " (recording…)" : " (listening…)"}`
+            : "🎤 Voice Dictation"}
+        </button>
+        {dictated && !recording && (
+          <button
+            onClick={() => void cleanupDictated()}
+            disabled={cleaning || !text.trim()}
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-500 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+          >
+            {cleaning ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <Sparkles size={15} />
+            )}
+            ✨ Clean Up with AI
+          </button>
+        )}
+      </div>
+      {transcribing && (
+        <div className="flex items-center gap-2 text-sm text-zinc-500">
+          <Loader2 className="animate-spin" size={15} /> Transcribing recording…
+        </div>
+      )}
       <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
+        value={interim ? `${text}${text.endsWith(" ") || !text ? "" : " "}${interim}` : text}
+        onChange={(e) => {
+          setText(e.target.value);
+          setInterim("");
+        }}
         rows={10}
         className={`${inputCls} whitespace-pre-wrap`}
-        placeholder="Paste or type text here…"
+        placeholder="Paste or type text here… or dictate with the microphone."
         aria-label="Text"
       />
       <div className="flex items-center justify-between gap-2">

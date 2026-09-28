@@ -5,6 +5,7 @@ import {
   BookmarkPlus,
   Focus,
   Loader2,
+  Mic,
   Sparkles,
   TriangleAlert,
   Type,
@@ -143,6 +144,16 @@ export function ReaderView({ docId }: { docId: string }) {
   const [prefs, setPrefs] = useState<ReaderPrefs>(DEFAULT_PREFS);
   const [showFontPanel, setShowFontPanel] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiTab, setAiTab] = useState<
+    "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks"
+  >("summary");
+
+  function openAi(
+    tab: "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" = "summary",
+  ) {
+    setAiTab(tab);
+    setAiOpen(true);
+  }
   const [selection, setSelection] = useState<TextSelection | null>(null);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const articleRef = useRef<HTMLDivElement>(null);
@@ -405,12 +416,21 @@ export function ReaderView({ docId }: { docId: string }) {
           <BookmarkPlus size={19} />
         </button>
         <button
-          onClick={() => setAiOpen(true)}
+          onClick={() => openAi("summary")}
           className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
           aria-label="Open AI assistant"
           title="AI assistant"
         >
           <Sparkles size={19} />
+        </button>
+        <button
+          onClick={() => openAi("podcast")}
+          className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+          aria-label="Generate AI podcast"
+          title="Generate AI podcast"
+        >
+          <Mic size={15} />
+          <span className="hidden sm:inline">🎙️ Podcast</span>
         </button>
       </div>
 
@@ -509,7 +529,7 @@ export function ReaderView({ docId }: { docId: string }) {
         assistant to explain it
       </p>
 
-      <PlayerBar player={player} doc={doc} onOpenAI={() => setAiOpen(true)} />
+      <PlayerBar player={player} doc={doc} onOpenAI={() => openAi("summary")} />
       <AIDrawer
         open={aiOpen}
         onClose={() => setAiOpen(false)}
@@ -520,6 +540,7 @@ export function ReaderView({ docId }: { docId: string }) {
         onJump={jumpTo}
         onAddBookmark={addBookmark}
         onDeleteBookmark={deleteBookmark}
+        initialTab={aiTab}
       />
     </div>
   );

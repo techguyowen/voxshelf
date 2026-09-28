@@ -112,6 +112,48 @@ export interface CacheStats {
   audioDir: string;
 }
 
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface QuizQuestion {
+  question: string;
+  options: string[];
+  answerIndex: number;
+  explanation: string;
+}
+
+export interface Flashcard {
+  front: string;
+  back: string;
+}
+
+export interface QuizResult {
+  questions: QuizQuestion[];
+  flashcards: Flashcard[];
+}
+
+export type PodcastSpeaker = "Alex" | "Sam";
+
+export interface PodcastLine {
+  speaker: PodcastSpeaker;
+  voice: "Kore" | "Puck";
+  text: string;
+}
+
+export interface PodcastEpisode {
+  id: string;
+  docId: string;
+  title: string;
+  lines: PodcastLine[];
+  audioHash: string | null;
+  audioUrl: string | null;
+  durationMs: number;
+  transcriptDocId: string | null;
+  createdAt: string;
+}
+
 export type ReaderFont = "sans" | "serif" | "mono" | "dyslexic";
 
 export interface ReaderPrefs {

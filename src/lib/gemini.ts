@@ -120,6 +120,30 @@ export async function generateText(
   });
 }
 
+/** Transcribe recorded speech audio with Gemini's audio understanding. */
+export async function transcribeAudio(
+  audioBase64: string,
+  mimeType: string,
+  explicitKey?: string | null,
+): Promise<string> {
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt =
+    "Transcribe the speech in this audio recording exactly as spoken, in the speaker's language. " +
+    "Return only the transcription text with basic sentence punctuation. " +
+    "If there is no intelligible speech, reply with an empty string.";
+  return tryEach(textModels(), async (model) => {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        { text: prompt },
+        { inlineData: { mimeType, data: audioBase64 } },
+      ],
+    });
+    return partsText(response);
+  });
+}
+
 /** OCR / transcription of an image with Gemini's vision understanding. */
 export async function transcribeImage(
   imageBase64: string,
@@ -231,6 +255,228 @@ export async function summarizeDocument(
   return ask(
     `Summarize the document "${title}" in a ${length === "short" ? "concise (~150 words)" : "detailed (~400 words, bullets welcome)"} summary capturing the key points. Use plain paragraphs, no preamble.\n\n---\n${text}`,
   );
+}
+
+export interface ChatHistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/** Answer a question strictly grounded in the provided document content. */
+export async function chatWithDocument(
+  title: string,
+  text: string,
+  history: ChatHistoryMessage[],
+  question: string,
+  explicitKey?: string | null,
+): Promise<string> {
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+  const docExcerpt = text.length > 24000 ? `${text.slice(0, 24000)}\n\n[…document truncated…]` : text;
+  const historyBlock = history
+    .slice(-12)
+    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content.slice(0, 2000)}`)
+    .join("\n");
+  const prompt =
+    `You are a helpful reading assistant inside the VocalFlow app. Answer the user's question STRICTLY using only the document content below. ` +
+    `If the answer is not in the document, say so clearly and do not invent facts. ` +
+    `Keep answers concise (2-6 sentences) unless the user asks for more detail. Use plain text, no preamble headers.\n\n` +
+    `Document title: "${title}"\n\n--- DOCUMENT ---\n${docExcerpt}\n--- END ---\n\n` +
+    (historyBlock ? `Conversation so far:\n${historyBlock}\n\n` : "") +
+    `User question: ${question}\n\nAnswer:`;
+  return tryEach(textModels(), async (model) => {
+    const response = await ai.models.generateContent({ model, contents: prompt });
+    const out = partsText(response);
+    if (!out) throw new GeminiError(`Model ${model} returned empty text.`);
+    return out;
+  });
+}
+
+export interface GeneratedQuizQuestion {
+  question: string;
+  options: string[];
+  answerIndex: number;
+  explanation: string;
+}
+
+export interface GeneratedFlashcard {
+  front: string;
+  back: string;
+}
+
+export interface GeneratedQuiz {
+  questions: GeneratedQuizQuestion[];
+  flashcards: GeneratedFlashcard[];
+}
+
+function extractJsonObject(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(trimmed);
+  const body = (fenced ? fenced[1] : trimmed).trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("No JSON object found in model response.");
+  return body.slice(start, end + 1);
+}
+
+function normalizeQuiz(parsed: unknown): GeneratedQuiz {
+  if (!parsed || typeof parsed !== "object") throw new Error("Invalid quiz JSON.");
+  const obj = parsed as { questions?: unknown; flashcards?: unknown };
+  if (!Array.isArray(obj.questions) || !Array.isArray(obj.flashcards)) {
+    throw new Error("Quiz JSON is missing questions or flashcards.");
+  }
+  const questions: GeneratedQuizQuestion[] = obj.questions.slice(0, 5).map((q: unknown, i: number) => {
+    const r = (q ?? {}) as { question?: unknown; options?: unknown; answerIndex?: unknown; correctIndex?: unknown; explanation?: unknown };
+    const options = Array.isArray(r.options) ? r.options.map((o) => String(o)).slice(0, 4) : [];
+    while (options.length < 4) options.push(`Option ${options.length + 1}`);
+    const rawIdx = typeof r.answerIndex === "number" ? r.answerIndex : typeof r.correctIndex === "number" ? r.correctIndex : 0;
+    return {
+      question: typeof r.question === "string" && r.question.trim() ? r.question.trim() : `Question ${i + 1}`,
+      options,
+      answerIndex: Math.min(3, Math.max(0, Math.floor(rawIdx))),
+      explanation: typeof r.explanation === "string" ? r.explanation.trim() : "",
+    };
+  });
+  const flashcards: GeneratedFlashcard[] = obj.flashcards.slice(0, 5).map((c: unknown, i: number) => {
+    const r = (c ?? {}) as { front?: unknown; back?: unknown; concept?: unknown; explanation?: unknown };
+    const front = typeof r.front === "string" ? r.front : typeof r.concept === "string" ? r.concept : "";
+    const back = typeof r.back === "string" ? r.back : typeof r.explanation === "string" ? r.explanation : "";
+    return {
+      front: front.trim() || `Concept ${i + 1}`,
+      back: back.trim() || "See document.",
+    };
+  });
+  if (questions.length === 0) throw new Error("Model returned no quiz questions.");
+  return { questions, flashcards };
+}
+
+/** Generate 5 multiple-choice questions + 5 flashcards with JSON structured output. */
+export async function generateQuiz(
+  title: string,
+  text: string,
+  explicitKey?: string | null,
+): Promise<GeneratedQuiz> {
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+  const docExcerpt = text.length > 20000 ? `${text.slice(0, 20000)}\n\n[…document truncated…]` : text;
+  const prompt =
+    `You are a study coach. Based ONLY on the document below, create a JSON object with exactly 5 multiple-choice questions ("questions", each with "question", "options" (exactly 4 strings), "answerIndex" (0-3), "explanation") ` +
+    `and exactly 5 flashcards ("flashcards", each with "front" (concept) and "back" (concise explanation)). ` +
+    `Questions should test key takeaways, arguments, and important details. Return ONLY valid JSON, no markdown.\n\n` +
+    `Document title: "${title}"\n\n--- DOCUMENT ---\n${docExcerpt}\n--- END ---`;
+  const schema = {
+    type: "object",
+    properties: {
+      questions: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            question: { type: "string" },
+            options: { type: "array", items: { type: "string" } },
+            answerIndex: { type: "integer" },
+            explanation: { type: "string" },
+          },
+          required: ["question", "options", "answerIndex", "explanation"],
+        },
+      },
+      flashcards: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { front: { type: "string" }, back: { type: "string" } },
+          required: ["front", "back"],
+        },
+      },
+    },
+    required: ["questions", "flashcards"],
+  };
+  return tryEach(textModels(), async (model) => {
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: { responseMimeType: "application/json", responseSchema: schema },
+    } as never);
+    const raw = partsText(response);
+    if (!raw) throw new GeminiError(`Model ${model} returned empty text.`);
+    return normalizeQuiz(JSON.parse(extractJsonObject(raw)) as unknown);
+  });
+}
+
+export interface PodcastLine {
+  speaker: "Alex" | "Sam";
+  voice: "Kore" | "Puck";
+  text: string;
+}
+
+export interface PodcastScript {
+  title: string;
+  lines: PodcastLine[];
+}
+
+/** Generate an engaging 2-host conversational podcast script from a document. */
+export async function generatePodcastScript(
+  title: string,
+  text: string,
+  explicitKey?: string | null,
+): Promise<PodcastScript> {
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+  const docExcerpt = text.length > 18000 ? `${text.slice(0, 18000)}\n\n[…document truncated…]` : text;
+  const prompt =
+    `You are a podcast scriptwriter. Turn the document below into a fun, engaging 2-host conversational podcast script ` +
+    `between Alex (knowledgeable, warm) and Sam (curious, witty). 10-16 short dialogue lines, alternating hosts, ` +
+    `opening with a hook, covering the key ideas with banter, ending with a sign-off. Each line must be speakable narration ` +
+    `(no stage directions, no markdown). Return ONLY valid JSON: {"title": "episode title", "lines": [{"speaker": "Alex"|"Sam", "text": "..."}]}.\n\n` +
+    `Document title: "${title}"\n\n--- DOCUMENT ---\n${docExcerpt}\n--- END ---`;
+  return tryEach(textModels(), async (model) => {
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: { responseMimeType: "application/json" },
+    } as never);
+    const raw = partsText(response);
+    if (!raw) throw new GeminiError(`Model ${model} returned empty text.`);
+    const parsed = JSON.parse(extractJsonObject(raw)) as {
+      title?: unknown;
+      lines?: Array<{ speaker?: unknown; text?: unknown }>;
+    };
+    if (!parsed || !Array.isArray(parsed.lines) || parsed.lines.length === 0) {
+      throw new Error("Model returned an empty podcast script.");
+    }
+    const lines: PodcastLine[] = parsed.lines.slice(0, 24).map((l, i) => {
+      const speaker: "Alex" | "Sam" = l.speaker === "Sam" ? "Sam" : l.speaker === "Alex" ? "Alex" : i % 2 === 0 ? "Alex" : "Sam";
+      return {
+        speaker,
+        voice: (speaker === "Alex" ? "Kore" : "Puck") as "Kore" | "Puck",
+        text: typeof l.text === "string" ? l.text.trim().slice(0, 950) : "",
+      };
+    }).filter((l) => l.text.length > 0);
+    if (lines.length === 0) throw new Error("Model returned an empty podcast script.");
+    return {
+      title: typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim().slice(0, 160) : `Podcast: ${title}`.slice(0, 160),
+      lines,
+    };
+  });
+}
+
+/** Cleanup for voice-dictated text: punctuation, capitalization, filler words. */
+export async function cleanupDictation(
+  text: string,
+  explicitKey?: string | null,
+): Promise<string> {
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt =
+    "Clean up the following voice-dictated text for reading and text-to-speech. " +
+    "Fix punctuation and capitalization, split run-on sentences, remove filler words (um, uh, like, you know, basically, actually) " +
+    "where they add no meaning, but preserve the speaker's words and meaning. " +
+    "Do not summarize, reorder, or add commentary. Return only the cleaned text.\n\n---\n" +
+    text.slice(0, 12000);
+  return tryEach(textModels(), async (model) => {
+    const response = await ai.models.generateContent({ model, contents: prompt });
+    return partsText(response) || text;
+  });
 }
 
 export async function explainSelection(
