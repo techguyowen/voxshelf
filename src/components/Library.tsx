@@ -5,6 +5,8 @@ import {
   BookOpen,
   Download,
   FileText,
+  Folder as FolderIcon,
+  FolderPlus,
   Globe,
   LayoutGrid,
   Link2,
@@ -14,12 +16,25 @@ import {
   ScanLine,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, downloadTextFile, safeFilename } from "@/lib/client";
-import type { DocumentSummary, SourceType } from "@/lib/types";
+import type { DocumentSummary, Folder, SourceType } from "@/lib/types";
 import { useUI } from "./AppShell";
+import { Modal } from "./Modal";
+
+const FOLDER_COLORS = [
+  "#64748b",
+  "#ef4444",
+  "#f97316",
+  "#eab308",
+  "#22c55e",
+  "#3b82f6",
+  "#a855f7",
+  "#ec4899",
+];
 
 function sourceBadge(source: SourceType): { label: string; icon: React.ReactNode } {
   switch (source) {
@@ -80,11 +95,26 @@ export function Library() {
   const [showArchived, setShowArchived] = useState(false);
   const [view, setView] = useState<"grid" | "list">("grid");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [folder, setFolder] = useState("");
+  const [folderModal, setFolderModal] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [newFolderColor, setNewFolderColor] = useState(FOLDER_COLORS[5]);
+  const [folderBusy, setFolderBusy] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 300);
     return () => clearTimeout(t);
   }, [q]);
+
+  const refreshFolders = useCallback(async () => {
+    try {
+      const res = await api.listFolders();
+      setFolders(res.folders);
+    } catch {
+      // Non-fatal: folder bar stays hidden.
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -95,6 +125,7 @@ export function Library() {
         tag: tag || undefined,
         sort,
         archived: showArchived,
+        folder: folder || undefined,
       });
       setDocs(res.documents);
       setTags(res.tags);
@@ -103,11 +134,15 @@ export function Library() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedQ, tag, sort, showArchived]);
+  }, [debouncedQ, tag, sort, showArchived, folder]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void refreshFolders();
+  }, [refreshFolders]);
 
   const filtered = useMemo(() => docs, [docs]);
 
@@ -139,6 +174,54 @@ export function Library() {
       }
     } catch (e) {
       alert(e instanceof Error ? e.message : "Update failed.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function createFolder() {
+    if (!newFolderName.trim()) return;
+    setFolderBusy(true);
+    try {
+      const f = await api.createFolder(newFolderName.trim(), newFolderColor);
+      setFolders((list) => [...list, f].sort((a, b) => a.name.localeCompare(b.name)));
+      setNewFolderName("");
+      setFolderModal(false);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not create folder.");
+    } finally {
+      setFolderBusy(false);
+    }
+  }
+
+  async function removeFolder(id: string, name: string) {
+    if (!confirm(`Delete folder "${name}"? Documents inside become unfiled.`)) return;
+    try {
+      await api.deleteFolder(id);
+      setFolders((list) => list.filter((f) => f.id !== id));
+      if (folder === id) setFolder("");
+      else void refreshFolders();
+      void refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not delete folder.");
+    }
+  }
+
+  async function moveDoc(doc: DocumentSummary, folderId: string | null) {
+    setBusyId(doc.id);
+    try {
+      const updated = await api.updateDocument(doc.id, { folderId });
+      const stillVisible =
+        folder === "" ||
+        (folder === "unfiled" ? updated.folderId === null : updated.folderId === folder);
+      setDocs((d) =>
+        stillVisible
+          ? d.map((x) => (x.id === doc.id ? updated : x))
+          : d.filter((x) => x.id !== doc.id),
+      );
+      void refreshFolders();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not move document.");
     } finally {
       setBusyId(null);
     }
@@ -190,6 +273,70 @@ export function Library() {
             <List size={17} />
           </button>
         </div>
+      </div>
+
+      <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Folders">
+        <button
+          onClick={() => setFolder("")}
+          role="tab"
+          aria-selected={folder === ""}
+          className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+            folder === ""
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+          }`}
+        >
+          All Documents
+        </button>
+        <button
+          onClick={() => setFolder(folder === "unfiled" ? "" : "unfiled")}
+          role="tab"
+          aria-selected={folder === "unfiled"}
+          className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+            folder === "unfiled"
+              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+              : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+          }`}
+        >
+          Unfiled
+        </button>
+        {folders.map((f) => (
+          <span
+            key={f.id}
+            className={`flex shrink-0 items-center gap-1 rounded-full py-0.5 pl-3 pr-1 text-xs font-medium ${
+              folder === f.id
+                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+            }`}
+          >
+            <button
+              onClick={() => setFolder(folder === f.id ? "" : f.id)}
+              role="tab"
+              aria-selected={folder === f.id}
+              className="flex items-center gap-1.5 py-1"
+            >
+              <FolderIcon size={13} style={{ color: f.color || undefined }} />
+              {f.name}
+              {typeof f.documentCount === "number" && (
+                <span className="opacity-60">({f.documentCount})</span>
+              )}
+            </button>
+            <button
+              onClick={() => void removeFolder(f.id, f.name)}
+              className="rounded-full p-1 opacity-50 hover:bg-red-100 hover:text-red-600 hover:opacity-100 dark:hover:bg-red-950"
+              title={`Delete folder "${f.name}"`}
+              aria-label={`Delete folder "${f.name}"`}
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ))}
+        <button
+          onClick={() => setFolderModal(true)}
+          className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-emerald-400"
+        >
+          <FolderPlus size={13} /> New Folder
+        </button>
       </div>
 
       <div className="mb-3 flex flex-col gap-2 sm:flex-row">
@@ -316,6 +463,15 @@ export function Library() {
                         Archived
                       </span>
                     )}
+                    {doc.folderId && (
+                      <span className="flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        <FolderIcon
+                          size={11}
+                          style={{ color: folders.find((f) => f.id === doc.folderId)?.color || undefined }}
+                        />
+                        {folders.find((f) => f.id === doc.folderId)?.name || "Folder"}
+                      </span>
+                    )}
                     <span className="ml-auto shrink-0 text-[11px] text-zinc-400">
                       {timeAgo(doc.updatedAt)}
                     </span>
@@ -374,6 +530,21 @@ export function Library() {
                   >
                     {pct > 0 && pct < 100 ? "Resume" : pct >= 100 ? "Replay" : "Read"}
                   </button>
+                  <select
+                    value={doc.folderId || ""}
+                    onChange={(e) => void moveDoc(doc, e.target.value || null)}
+                    disabled={busyId === doc.id}
+                    className="max-w-28 rounded-lg border border-zinc-200 px-1 py-1.5 text-xs text-zinc-500 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+                    title="Move to folder"
+                    aria-label={`Move "${doc.title}" to folder`}
+                  >
+                    <option value="">Unfiled</option>
+                    {folders.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name}
+                      </option>
+                    ))}
+                  </select>
                   <button
                     onClick={() => void exportDoc(doc, "txt")}
                     disabled={busyId === doc.id}
@@ -407,6 +578,66 @@ export function Library() {
             );
           })}
         </div>
+      )}
+
+      {folderModal && (
+        <Modal title="New Folder" onClose={() => setFolderModal(false)}>
+          <div className="space-y-4">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                Folder name
+              </span>
+              <input
+                autoFocus
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void createFolder();
+                }}
+                placeholder="e.g. Research papers"
+                maxLength={100}
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <div>
+              <span className="mb-1.5 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                Folder color
+              </span>
+              <div className="flex gap-2">
+                {FOLDER_COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setNewFolderColor(c)}
+                    aria-label={`Folder color ${c}`}
+                    aria-pressed={newFolderColor === c}
+                    className={`h-8 w-8 rounded-full border-2 transition-transform ${
+                      newFolderColor === c
+                        ? "border-zinc-900 scale-110 dark:border-white"
+                        : "border-transparent hover:scale-105"
+                    }`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setFolderModal(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void createFolder()}
+                disabled={folderBusy || !newFolderName.trim()}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+              >
+                {folderBusy && <Loader2 size={14} className="animate-spin" />}
+                Create folder
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -30,6 +30,26 @@ export interface Bookmark {
   sentencePreview?: string;
 }
 
+export type HighlightColor = "yellow" | "blue" | "green" | "purple" | "pink";
+
+export interface Highlight {
+  id: string;
+  docId: string;
+  sentenceIdx: number;
+  text: string;
+  color: HighlightColor;
+  note: string | null;
+  createdAt: string;
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  color: string | null;
+  createdAt: string;
+  documentCount?: number;
+}
+
 export interface DocumentSummary {
   id: string;
   title: string;
@@ -41,6 +61,7 @@ export interface DocumentSummary {
   sentenceCount: number;
   voice: string;
   speed: number;
+  folderId: string | null;
   tags: string[];
   progressSentenceIndex: number;
   progressCharOffset: number;
@@ -54,6 +75,7 @@ export interface DocumentDetail extends DocumentSummary {
   stylePrompt: string | null;
   sentences: Sentence[];
   bookmarks: Bookmark[];
+  highlights: Highlight[];
 }
 
 export interface VoiceInfo {

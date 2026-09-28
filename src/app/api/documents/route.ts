@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
           ? sort
           : "updated",
       includeArchived: sp.get("archived") === "1",
+      folderId: sp.get("folder") || undefined,
     };
     return NextResponse.json({
       documents: listDocuments(opts),

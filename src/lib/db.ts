@@ -159,6 +159,22 @@ CREATE TABLE IF NOT EXISTS bookmarks (
   created_at TEXT NOT NULL,
   FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS highlights (
+  id TEXT PRIMARY KEY,
+  doc_id TEXT NOT NULL,
+  sentence_idx INTEGER NOT NULL DEFAULT 0,
+  text TEXT NOT NULL DEFAULT '',
+  color TEXT NOT NULL DEFAULT 'yellow',
+  note TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS folders (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  color TEXT,
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS podcasts (
   id TEXT PRIMARY KEY,
   doc_id TEXT NOT NULL,
@@ -176,6 +192,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 CREATE INDEX IF NOT EXISTS idx_sentences_doc ON sentences(doc_id);
 CREATE INDEX IF NOT EXISTS idx_bookmarks_doc ON bookmarks(doc_id);
+CREATE INDEX IF NOT EXISTS idx_highlights_doc ON highlights(doc_id);
 CREATE INDEX IF NOT EXISTS idx_podcasts_doc ON podcasts(doc_id);
 CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents(updated_at);
 `;
@@ -202,6 +219,20 @@ export function getDb(): DbHandle {
       );
     }
     handle.exec(SCHEMA);
+    // Migration: documents.folder_id (added after v1 schema).
+    try {
+      const cols = handle
+        .prepare("PRAGMA table_info(documents)")
+        .all() as { name: string }[];
+      if (!cols.some((c) => c.name === "folder_id")) {
+        handle.exec("ALTER TABLE documents ADD COLUMN folder_id TEXT;");
+      }
+      handle.exec(
+        "CREATE INDEX IF NOT EXISTS idx_documents_folder ON documents(folder_id);",
+      );
+    } catch {
+      // Non-fatal: folder features degrade to unfiled-only.
+    }
     const ts = new Date().toISOString();
     handle
       .prepare(

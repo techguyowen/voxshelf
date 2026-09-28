@@ -4,8 +4,14 @@ import type { DocumentDetail } from "@/lib/types";
 
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "error";
 
+export interface SentenceFilter {
+  (text: string): { text: string; shouldSkip: boolean };
+}
+
 export interface UsePlayerOpts {
   onProgress?: (sentenceIdx: number, charOffset: number) => void;
+  /** Auto-skip filter: cleans speakable text and flags whole-sentence skips. */
+  filterSentence?: SentenceFilter;
 }
 
 interface Clip {
@@ -136,6 +142,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const voiceRef = useRef(voice);
   const styleRef = useRef(stylePrompt);
   const onProgressRef = useRef(opts.onProgress);
+  const filterRef = useRef(opts.filterSentence);
   const sleepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -147,6 +154,54 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   voiceRef.current = voice;
   styleRef.current = stylePrompt;
   onProgressRef.current = opts.onProgress;
+  filterRef.current = opts.filterSentence;
+
+  /** Speakable text for a sentence after the auto-skip filter. */
+  const speakText = useCallback((idx: number): string => {
+    const raw = docRef.current?.sentences[idx]?.text ?? "";
+    const f = filterRef.current;
+    if (!f) return raw;
+    try {
+      const out = f(raw);
+      return out.text && out.text.trim() ? out.text : raw;
+    } catch {
+      return raw;
+    }
+  }, []);
+
+  const isSkipped = useCallback((idx: number): boolean => {
+    const d = docRef.current;
+    const f = filterRef.current;
+    if (!d || !f || idx < 0 || idx >= d.sentences.length) return false;
+    try {
+      return f(d.sentences[idx].text).shouldSkip === true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  /** Resolve to the nearest readable sentence, preferring direction `dir`. */
+  const resolveReadable = useCallback(
+    (idx: number, dir: 1 | -1): number => {
+      const d = docRef.current;
+      if (!d || d.sentences.length === 0) return idx;
+      const clamped = Math.max(0, Math.min(d.sentences.length - 1, idx));
+      if (!isSkipped(clamped)) return clamped;
+      let i = clamped + dir;
+      while (i >= 0 && i < d.sentences.length) {
+        if (!isSkipped(i)) return i;
+        i += dir;
+      }
+      // Nothing readable in this direction: try the other way.
+      i = clamped - dir;
+      while (i >= 0 && i < d.sentences.length) {
+        if (!isSkipped(i)) return i;
+        i -= dir;
+      }
+      return clamped;
+    },
+    [isSkipped],
+  );
 
   const cacheKey = useCallback(
     (idx: number) => `${docRef.current?.id}:${idx}:${voiceRef.current}:${styleRef.current}`,
@@ -159,14 +214,15 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       if (!d || idx < 0 || idx >= d.sentences.length) {
         return Promise.reject(new Error("Sentence out of range."));
       }
-      const key = `${d.id}:${idx}:${voiceRef.current}:${styleRef.current}`;
+      const speak = speakText(idx);
+      const key = `${d.id}:${idx}:${voiceRef.current}:${styleRef.current}:${speak.length}:${speak.slice(0, 48)}`;
       const hit = cacheRef.current.get(key);
       if (hit) return Promise.resolve(hit);
       const pending = inflightRef.current.get(key);
       if (pending) return pending;
       const p = api
         .tts({
-          text: d.sentences[idx].text,
+          text: speak,
           voice: voiceRef.current,
           stylePrompt: styleRef.current || undefined,
         })
@@ -181,7 +237,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       inflightRef.current.set(key, p);
       return p;
     },
-    [],
+    [speakText],
   );
 
   const reportProgress = useCallback((idx: number) => {
@@ -232,7 +288,10 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     async (idx: number, autoplay: boolean) => {
       const d = docRef.current;
       if (!d || d.sentences.length === 0) return;
-      const clamped = Math.max(0, Math.min(d.sentences.length - 1, idx));
+      const clamped = resolveReadable(
+        idx,
+        idx < currentIdxRef.current ? -1 : 1,
+      );
       const op = ++opRef.current;
       setError(null);
       setLoadingIdx(clamped);
@@ -273,7 +332,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         setError(e instanceof Error ? e.message : "Playback failed.");
       }
     },
-    [ensureAudio, reportProgress],
+    [ensureAudio, reportProgress, resolveReadable],
   );
 
   const pause = useCallback(() => {
@@ -476,8 +535,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       const frac = Math.min(1, Math.max(0, cur / dur));
       setClipProgress(frac);
 
-      const d = docRef.current;
-      const sentenceText = d?.sentences[currentIdxRef.current]?.text ?? "";
+      const sentenceText = speakText(currentIdxRef.current);
       const wordIdx = computeActiveWordIndex(sentenceText, cur, dur);
       setCurrentWord(wordIdx);
     };
@@ -529,7 +587,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       audio.removeEventListener("pause", onPause);
       audioRef.current = null;
     };
-  }, [goTo, reportProgress, clearSleep]);
+  }, [goTo, reportProgress, clearSleep, speakText]);
 
   // --- reset when the document changes ---
   useEffect(() => {

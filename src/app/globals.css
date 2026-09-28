@@ -1,5 +1,7 @@
 @import "@fontsource/atkinson-hyperlegible/400.css";
 @import "@fontsource/atkinson-hyperlegible/700.css";
+@import url("https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap");
+@import url("https://fonts.cdnfonts.com/css/open-dyslexic");
 
 @tailwind base;
 @tailwind components;
@@ -71,6 +73,114 @@ body {
   font-weight: 600;
   box-shadow: 0 0 0 2px rgba(251, 191, 36, 0.5);
 }
+
+/* ---- Cursor / highlight color variants (data-cursor on reader) ---- */
+[data-cursor="blue"] .vf-word-active {
+  background-color: #38bdf8 !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;
+}
+[data-cursor="blue"] .vf-sentence-active {
+  background-color: rgb(186 230 253 / 0.65) !important;
+  box-shadow: 0 0 0 1px rgb(2 132 199 / 0.35), 0 2px 14px rgb(2 132 199 / 0.18) !important;
+}
+.dark [data-cursor="blue"] .vf-sentence-active {
+  background-color: rgb(12 74 110 / 0.55) !important;
+  box-shadow: 0 0 0 1px rgb(56 189 248 / 0.3), 0 2px 16px rgb(56 189 248 / 0.12) !important;
+}
+[data-cursor="green"] .vf-word-active {
+  background-color: #34d399 !important;
+  box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.45) !important;
+}
+[data-cursor="green"] .vf-sentence-active {
+  background-color: rgb(167 243 208 / 0.6) !important;
+  box-shadow: 0 0 0 1px rgb(5 150 105 / 0.35), 0 2px 14px rgb(5 150 105 / 0.18) !important;
+}
+.dark [data-cursor="green"] .vf-sentence-active {
+  background-color: rgb(6 78 59 / 0.55) !important;
+  box-shadow: 0 0 0 1px rgb(52 211 153 / 0.3), 0 2px 16px rgb(52 211 153 / 0.12) !important;
+}
+[data-cursor="purple"] .vf-word-active {
+  background-color: #a78bfa !important;
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.45) !important;
+}
+[data-cursor="purple"] .vf-sentence-active {
+  background-color: rgb(221 214 254 / 0.65) !important;
+  box-shadow: 0 0 0 1px rgb(124 58 237 / 0.35), 0 2px 14px rgb(124 58 237 / 0.18) !important;
+}
+.dark [data-cursor="purple"] .vf-sentence-active {
+  background-color: rgb(76 29 149 / 0.5) !important;
+  box-shadow: 0 0 0 1px rgb(167 139 250 / 0.3), 0 2px 16px rgb(167 139 250 / 0.12) !important;
+}
+[data-cursor="pink"] .vf-word-active {
+  background-color: #fb7185 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 2px rgba(251, 113, 133, 0.45) !important;
+}
+[data-cursor="pink"] .vf-sentence-active {
+  background-color: rgb(254 205 211 / 0.65) !important;
+  box-shadow: 0 0 0 1px rgb(225 29 72 / 0.3), 0 2px 14px rgb(225 29 72 / 0.15) !important;
+}
+.dark [data-cursor="pink"] .vf-sentence-active {
+  background-color: rgb(136 19 55 / 0.5) !important;
+  box-shadow: 0 0 0 1px rgb(251 113 133 / 0.3), 0 2px 16px rgb(251 113 133 / 0.12) !important;
+}
+[data-cursor="orange"] .vf-word-active {
+  background-color: #fb923c !important;
+  box-shadow: 0 0 0 2px rgba(251, 146, 60, 0.45) !important;
+}
+[data-cursor="orange"] .vf-sentence-active {
+  background-color: rgb(254 215 170 / 0.65) !important;
+  box-shadow: 0 0 0 1px rgb(234 88 12 / 0.35), 0 2px 14px rgb(234 88 12 / 0.18) !important;
+}
+.dark [data-cursor="orange"] .vf-sentence-active {
+  background-color: rgb(124 45 18 / 0.5) !important;
+  box-shadow: 0 0 0 1px rgb(251 146 60 / 0.3), 0 2px 16px rgb(251 146 60 / 0.12) !important;
+}
+
+/* Highlight-sentence toggle off: keep word cursor, drop sentence glow. */
+[data-highlight="off"] .vf-sentence-active {
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ---- Reader font choices ---- */
+.font-ap-georgia {
+  font-family: Georgia, "Times New Roman", serif;
+}
+.font-ap-merriweather {
+  font-family: Merriweather, Georgia, serif;
+}
+.font-ap-inter {
+  font-family: Inter, system-ui, sans-serif;
+}
+.font-ap-dyslexic {
+  font-family: "Open-Dyslexic", "OpenDyslexic", "Atkinson Hyperlegible", Verdana, sans-serif;
+}
+.font-ap-jetbrains {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ---- Skipped sentences (auto-skip preview) ---- */
+.vf-sentence-skipped {
+  opacity: 0.45;
+}
+
+/* ---- User highlights ---- */
+.vf-hl {
+  border-radius: 0.2rem;
+  padding: 0.05em 0.1em;
+  margin: 0 -0.05em;
+}
+.vf-hl-yellow { background-color: rgb(254 240 138 / 0.9); box-shadow: 0 0 0 1px rgb(202 138 4 / 0.25); }
+.vf-hl-blue { background-color: rgb(186 230 253 / 0.9); box-shadow: 0 0 0 1px rgb(2 132 199 / 0.25); }
+.vf-hl-green { background-color: rgb(167 243 208 / 0.9); box-shadow: 0 0 0 1px rgb(5 150 105 / 0.25); }
+.vf-hl-purple { background-color: rgb(221 214 254 / 0.9); box-shadow: 0 0 0 1px rgb(124 58 237 / 0.25); }
+.vf-hl-pink { background-color: rgb(254 205 211 / 0.9); box-shadow: 0 0 0 1px rgb(225 29 72 / 0.2); }
+.dark .vf-hl-yellow { background-color: rgb(113 63 18 / 0.6); }
+.dark .vf-hl-blue { background-color: rgb(12 74 110 / 0.6); }
+.dark .vf-hl-green { background-color: rgb(6 78 59 / 0.6); }
+.dark .vf-hl-purple { background-color: rgb(76 29 149 / 0.6); }
+.dark .vf-hl-pink { background-color: rgb(136 19 55 / 0.6); }
 
 /* Reading ruler / focus-line mode */
 .ruler-mode .vf-sentence {

@@ -3,14 +3,18 @@
 import {
   ArrowLeft,
   BookmarkPlus,
+  FastForward,
   Focus,
+  Highlighter,
   Keyboard,
   Loader2,
   Mic,
   Sparkles,
+  StickyNote,
   Timer,
   TriangleAlert,
   Type,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -23,6 +27,7 @@ import {
 } from "react";
 import { usePlayer } from "@/hooks/usePlayer";
 import { api } from "@/lib/client";
+import { applyAutoSkip, loadAutoSkip, saveAutoSkip, type AutoSkipOptions } from "@/lib/autoSkip";
 import { estimateTtsCostUsd, formatUsd } from "@/lib/pricing";
 import {
   cumulativeWordCounts,
@@ -32,12 +37,21 @@ import {
 import type {
   Bookmark,
   DocumentDetail,
-  ReaderFont,
+  Highlight,
+  HighlightColor,
   ReaderPrefs,
   Sentence,
 } from "@/lib/types";
 import { AIDrawer, type TextSelection } from "./AIDrawer";
+import {
+  AppearanceMenu,
+  appearanceFontClass,
+  loadAppearance,
+  saveAppearance,
+  type AppearancePrefs,
+} from "./AppearanceMenu";
 import { useUI } from "./AppShell";
+import { AutoSkipModal } from "./AutoSkipModal";
 import { PlayerBar } from "./PlayerBar";
 
 const PREFS_KEY = "vf-reader-prefs";
@@ -49,18 +63,21 @@ const DEFAULT_PREFS: ReaderPrefs = {
   rulerMode: false,
 };
 
+const HIGHLIGHT_SWATCHES: { id: HighlightColor; swatch: string }[] = [
+  { id: "yellow", swatch: "#facc15" },
+  { id: "blue", swatch: "#38bdf8" },
+  { id: "green", swatch: "#34d399" },
+  { id: "purple", swatch: "#a78bfa" },
+  { id: "pink", swatch: "#fb7185" },
+];
+
 function loadPrefs(): ReaderPrefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return DEFAULT_PREFS;
     const parsed = JSON.parse(raw) as Partial<ReaderPrefs>;
     return {
-      font:
-        parsed.font === "serif" ||
-        parsed.font === "mono" ||
-        parsed.font === "dyslexic"
-          ? parsed.font
-          : "sans",
+      font: "sans",
       fontSize:
         typeof parsed.fontSize === "number"
           ? Math.min(30, Math.max(14, parsed.fontSize))
@@ -105,32 +122,80 @@ function WordSpans({
   return <>{nodes}</>;
 }
 
+/** Render sentence text with user highlight <mark> ranges applied. */
+function HighlightedText({ text, highlights }: { text: string; highlights: Highlight[] }) {
+  if (highlights.length === 0) return <>{text}</>;
+  type Range = { start: number; end: number; color: HighlightColor; id: string };
+  const ranges: Range[] = [];
+  for (const h of highlights) {
+    if (!h.text) continue;
+    let from = 0;
+    for (;;) {
+      const at = text.indexOf(h.text, from);
+      if (at === -1) break;
+      ranges.push({ start: at, end: at + h.text.length, color: h.color, id: h.id });
+      from = at + 1;
+      break; // one mark per highlight keeps overlapping notes readable
+    }
+  }
+  ranges.sort((a, b) => a.start - b.start);
+  const merged: Range[] = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r.start < last.end) continue; // skip overlaps
+    merged.push(r);
+  }
+  if (merged.length === 0) return <>{text}</>;
+  const nodes: React.ReactNode[] = [];
+  let pos = 0;
+  merged.forEach((r, i) => {
+    if (r.start > pos) nodes.push(<span key={`t${i}`}>{text.slice(pos, r.start)}</span>);
+    nodes.push(
+      <mark key={r.id} className={`vf-hl vf-hl-${r.color}`}>
+        {text.slice(r.start, r.end)}
+      </mark>,
+    );
+    pos = r.end;
+  });
+  if (pos < text.length) nodes.push(<span key="tail">{text.slice(pos)}</span>);
+  return <>{nodes}</>;
+}
+
 const SentenceItem = memo(function SentenceItem({
   sentence,
+  displayText,
   active,
   near,
   loading,
   activeWord,
+  skipped,
+  clickable,
+  highlights,
   onPlay,
 }: {
   sentence: Sentence;
+  displayText: string;
   active: boolean;
   near: boolean;
   loading: boolean;
   activeWord: number;
+  skipped: boolean;
+  clickable: boolean;
+  highlights: Highlight[];
   onPlay: (idx: number) => void;
 }) {
   return (
     <p
       data-idx={sentence.idx}
-      onClick={() => onPlay(sentence.idx)}
-      className={`vf-sentence${active ? " vf-sentence-active" : ""}${near ? " vf-sentence-near" : ""}`}
-      title="Click to play from here"
+      onClick={clickable ? () => onPlay(sentence.idx) : undefined}
+      className={`vf-sentence${active ? " vf-sentence-active" : ""}${near ? " vf-sentence-near" : ""}${skipped ? " vf-sentence-skipped" : ""}`}
+      style={clickable ? undefined : { cursor: "default" }}
+      title={skipped ? "Skipped by auto-skip" : clickable ? "Click to play from here" : undefined}
     >
       {active ? (
-        <WordSpans text={sentence.text} activeWord={activeWord} />
+        <WordSpans text={displayText} activeWord={activeWord} />
       ) : (
-        sentence.text
+        <HighlightedText text={sentence.text} highlights={highlights} />
       )}
       {loading && (
         <Loader2 size={14} className="ml-2 inline animate-spin text-emerald-600" />
@@ -139,37 +204,43 @@ const SentenceItem = memo(function SentenceItem({
   );
 });
 
-const FONT_OPTIONS: { id: ReaderFont; label: string }[] = [
-  { id: "sans", label: "Sans" },
-  { id: "serif", label: "Serif" },
-  { id: "mono", label: "Mono" },
-  { id: "dyslexic", label: "Dyslexia-friendly" },
-];
+type AiTab = "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" | "highlights";
 
 export function ReaderView({ docId }: { docId: string }) {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<ReaderPrefs>(DEFAULT_PREFS);
-  const [showFontPanel, setShowFontPanel] = useState(false);
+  const [appearance, setAppearance] = useState<AppearancePrefs>(() =>
+    typeof window === "undefined" ? { cursorColor: "yellow", highlightSentence: true, font: "atkinson", autoPlay: false, clickToListen: true } : loadAppearance(),
+  );
+  const [autoSkip, setAutoSkip] = useState<AutoSkipOptions>(() =>
+    typeof window === "undefined"
+      ? { enabled: false, mode: "ai", skipHeaders: true, skipFooters: true, skipFootnotes: true, skipTables: true, skipFormulas: true, skipCitations: true, skipUrls: true, skipParentheses: false, skipBrackets: false, skipBraces: false }
+      : loadAutoSkip(),
+  );
+  const [showAppearance, setShowAppearance] = useState(false);
+  const [showAutoSkip, setShowAutoSkip] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
-  const [aiTab, setAiTab] = useState<
-    "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks"
-  >("summary");
+  const [aiTab, setAiTab] = useState<AiTab>("summary");
 
-  function openAi(
-    tab: "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" = "summary",
-  ) {
+  function openAi(tab: AiTab = "summary") {
     setAiTab(tab);
     setAiOpen(true);
   }
   const [selection, setSelection] = useState<TextSelection | null>(null);
+  const [selAnchor, setSelAnchor] = useState<{ sentenceIdx: number; x: number; y: number } | null>(null);
+  const [hlNote, setHlNote] = useState("");
+  const [hlNoteOpen, setHlNoteOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
   const articleRef = useRef<HTMLDivElement>(null);
   const { openShortcuts, shortcutsOpen } = useUI();
 
   useEffect(() => {
     setPrefs(loadPrefs());
+    setAppearance(loadAppearance());
+    setAutoSkip(loadAutoSkip());
   }, []);
 
   useEffect(() => {
@@ -181,6 +252,14 @@ export function ReaderView({ docId }: { docId: string }) {
   }, [prefs]);
 
   useEffect(() => {
+    saveAppearance(appearance);
+  }, [appearance]);
+
+  useEffect(() => {
+    saveAutoSkip(autoSkip);
+  }, [autoSkip]);
+
+  useEffect(() => {
     let live = true;
     setLoading(true);
     setLoadError(null);
@@ -190,6 +269,7 @@ export function ReaderView({ docId }: { docId: string }) {
         if (!live) return;
         setDoc(d);
         setBookmarks(d.bookmarks);
+        setHighlights(d.highlights || []);
         setLoading(false);
       })
       .catch((e) => {
@@ -223,11 +303,58 @@ export function ReaderView({ docId }: { docId: string }) {
     [docId],
   );
 
-  const player = usePlayer(doc, { onProgress: persistProgress });
-  const handlePlay = useCallback(
-    (idx: number) => player.playFrom(idx),
-    [player],
+  const filterSentence = useCallback(
+    (text: string) => {
+      const out = applyAutoSkip(text, autoSkip);
+      return { text: out.text, shouldSkip: out.shouldSkipSentence };
+    },
+    [autoSkip],
   );
+
+  const player = usePlayer(doc, { onProgress: persistProgress, filterSentence });
+  const handlePlay = useCallback(
+    (idx: number) => {
+      if (!appearance.clickToListen) return;
+      player.playFrom(idx);
+    },
+    [player, appearance.clickToListen],
+  );
+
+  // Auto-play as soon as the file opens (optional).
+  const autoPlayedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!doc || !appearance.autoPlay) return;
+    if (autoPlayedRef.current === doc.id) return;
+    autoPlayedRef.current = doc.id;
+    const t = setTimeout(() => player.play(), 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id, appearance.autoPlay]);
+
+  // Speakable (filtered) text per sentence for display + skip dimming.
+  const speakMap = useMemo(() => {
+    if (!doc) return new Map<number, { text: string; skipped: boolean }>();
+    const m = new Map<number, { text: string; skipped: boolean }>();
+    if (!autoSkip.enabled) return m;
+    for (const s of doc.sentences) {
+      const out = applyAutoSkip(s.text, autoSkip);
+      m.set(s.idx, {
+        text: out.text && out.text.trim() ? out.text : s.text,
+        skipped: out.shouldSkipSentence,
+      });
+    }
+    return m;
+  }, [doc, autoSkip]);
+
+  const highlightsBySentence = useMemo(() => {
+    const m = new Map<number, Highlight[]>();
+    for (const h of highlights) {
+      const list = m.get(h.sentenceIdx) || [];
+      list.push(h);
+      m.set(h.sentenceIdx, list);
+    }
+    return m;
+  }, [highlights]);
 
   // Persist voice/speed/style choice back to the document (debounced).
   useEffect(() => {
@@ -276,11 +403,15 @@ export function ReaderView({ docId }: { docId: string }) {
     const sel = window.getSelection();
     const text = sel?.toString().trim() || "";
     if (!sel || text.length < 2 || text.length > 2000) {
-      setSelection((s) => (s && text.length === 0 ? null : s));
-      if (text.length === 0) setSelection(null);
+      if (text.length === 0) {
+        setSelection(null);
+        setSelAnchor(null);
+        setHlNoteOpen(false);
+      }
       return;
     }
     let context = "";
+    let anchorIdx = 0;
     try {
       const node = sel.anchorNode;
       const el =
@@ -289,6 +420,7 @@ export function ReaderView({ docId }: { docId: string }) {
           : node?.parentElement?.closest("[data-idx]") ?? null;
       const idx = el ? Number(el.getAttribute("data-idx")) : NaN;
       if (Number.isFinite(idx) && doc) {
+        anchorIdx = idx;
         context = [
           doc.sentences[idx - 1]?.text,
           doc.sentences[idx]?.text,
@@ -300,8 +432,54 @@ export function ReaderView({ docId }: { docId: string }) {
     } catch {
       // ignore
     }
+    try {
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      const x = Math.min(
+        window.innerWidth - 300,
+        Math.max(8, rect.left + rect.width / 2 - 140),
+      );
+      setSelAnchor({ sentenceIdx: anchorIdx, x, y: rect.top });
+    } catch {
+      setSelAnchor({ sentenceIdx: anchorIdx, x: 16, y: 120 });
+    }
     setSelection({ text, context });
   }, [doc]);
+
+  const clearSelection = useCallback(() => {
+    window.getSelection()?.removeAllRanges();
+    setSelection(null);
+    setSelAnchor(null);
+    setHlNote("");
+    setHlNoteOpen(false);
+  }, []);
+
+  const saveHighlight = useCallback(
+    (color: HighlightColor) => {
+      if (!doc || !selection || !selAnchor) return;
+      api
+        .addHighlight(doc.id, {
+          sentenceIdx: selAnchor.sentenceIdx,
+          text: selection.text,
+          color,
+          note: hlNote.trim() || undefined,
+        })
+        .then((h) => {
+          setHighlights((list) => [...list, h].sort((a, b) => a.sentenceIdx - b.sentenceIdx));
+          clearSelection();
+        })
+        .catch((e) => alert(e instanceof Error ? e.message : "Highlight failed."));
+    },
+    [doc, selection, selAnchor, hlNote, clearSelection],
+  );
+
+  const deleteHighlight = useCallback(
+    (id: string) => {
+      if (!doc) return;
+      api.deleteHighlight(doc.id, id).catch(() => {});
+      setHighlights((list) => list.filter((h) => h.id !== id));
+    },
+    [doc],
+  );
 
   const addBookmark = useCallback(
     (note: string) => {
@@ -365,7 +543,8 @@ export function ReaderView({ docId }: { docId: string }) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Escape") {
       if (aiOpen) setAiOpen(false);
-      else if (showFontPanel) setShowFontPanel(false);
+      else if (showAutoSkip) setShowAutoSkip(false);
+      else if (showAppearance) setShowAppearance(false);
       return;
     }
     if (shortcutsOpen || !doc) return;
@@ -421,14 +600,7 @@ export function ReaderView({ docId }: { docId: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const fontCls =
-    prefs.font === "serif"
-      ? "font-serif"
-      : prefs.font === "mono"
-        ? "font-mono"
-        : prefs.font === "dyslexic"
-          ? "font-dyslexic reader-dyslexic"
-          : "font-readable";
+  const fontCls = appearanceFontClass(appearance.font);
 
   if (loading) {
     return (
@@ -476,12 +648,20 @@ export function ReaderView({ docId }: { docId: string }) {
           </p>
         </div>
         <button
-          onClick={() => setShowFontPanel((v) => !v)}
-          className={`rounded-lg p-2 ${showFontPanel ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
+          onClick={() => setShowAppearance((v) => !v)}
+          className={`rounded-lg p-2 ${showAppearance ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
           aria-label="Reading appearance"
           title="Font & layout"
         >
           <Type size={19} />
+        </button>
+        <button
+          onClick={() => setShowAutoSkip(true)}
+          className={`rounded-lg p-2 ${autoSkip.enabled ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" : "text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
+          aria-label="Auto-skip settings"
+          title="Auto-skip content"
+        >
+          <FastForward size={19} />
         </button>
         <button
           onClick={() => setPrefs((p) => ({ ...p, rulerMode: !p.rulerMode }))}
@@ -542,60 +722,38 @@ export function ReaderView({ docId }: { docId: string }) {
         >
           Est. cost: {formatUsd(docCostUsd)} (Free tier eligible)
         </span>
+        {autoSkip.enabled && (
+          <button
+            onClick={() => setShowAutoSkip(true)}
+            className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-200 dark:bg-sky-950/70 dark:text-sky-300 dark:hover:bg-sky-900"
+            title="Auto-skip is on — click to configure"
+          >
+            <FastForward size={12} />
+            Auto-skip {autoSkip.mode === "ai" ? "AI" : "Rules"}
+          </button>
+        )}
+        {highlights.length > 0 && (
+          <button
+            onClick={() => openAi("highlights")}
+            className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:hover:bg-amber-900"
+            title="Open highlights and notes"
+          >
+            <Highlighter size={12} />
+            {highlights.length} highlight{highlights.length === 1 ? "" : "s"}
+          </button>
+        )}
       </div>
 
-      {showFontPanel && (
-        <div className="mb-4 grid grid-cols-1 gap-3 rounded-xl border border-zinc-200 bg-white p-4 animate-fade-up sm:grid-cols-3 dark:border-zinc-800 dark:bg-zinc-900">
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              Font
-            </span>
-            <select
-              value={prefs.font}
-              onChange={(e) =>
-                setPrefs((p) => ({ ...p, font: e.target.value as ReaderFont }))
-              }
-              className="w-full rounded-lg border border-zinc-300 px-2 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            >
-              {FONT_OPTIONS.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              Size: {prefs.fontSize}px
-            </span>
-            <input
-              type="range"
-              min={14}
-              max={30}
-              step={1}
-              value={prefs.fontSize}
-              onChange={(e) =>
-                setPrefs((p) => ({ ...p, fontSize: Number(e.target.value) }))
-              }
-              className="w-full"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              Line height: {prefs.lineHeight.toFixed(1)}
-            </span>
-            <input
-              type="range"
-              min={1.3}
-              max={2.6}
-              step={0.1}
-              value={prefs.lineHeight}
-              onChange={(e) =>
-                setPrefs((p) => ({ ...p, lineHeight: Number(e.target.value) }))
-              }
-              className="w-full"
-            />
-          </label>
+      {showAppearance && (
+        <div className="mb-4">
+          <AppearanceMenu
+            prefs={appearance}
+            onChange={setAppearance}
+            fontSize={prefs.fontSize}
+            lineHeight={prefs.lineHeight}
+            onFontSize={(v) => setPrefs((p) => ({ ...p, fontSize: v }))}
+            onLineHeight={(v) => setPrefs((p) => ({ ...p, lineHeight: v }))}
+          />
         </div>
       )}
 
@@ -618,20 +776,29 @@ export function ReaderView({ docId }: { docId: string }) {
         onMouseUp={updateSelection}
         onTouchEnd={updateSelection}
         onKeyUp={updateSelection}
+        data-cursor={appearance.cursorColor}
+        data-highlight={appearance.highlightSentence ? "on" : "off"}
         className={`${fontCls}${prefs.rulerMode ? " ruler-mode" : ""} space-y-2.5 rounded-xl border border-zinc-200 bg-white p-4 sm:p-8 dark:border-zinc-800 dark:bg-zinc-900`}
         style={{ fontSize: prefs.fontSize, lineHeight: prefs.lineHeight }}
       >
-        {doc.sentences.map((s) => (
-          <SentenceItem
-            key={s.idx}
-            sentence={s}
-            active={s.idx === player.currentIdx}
-            near={Math.abs(s.idx - player.currentIdx) === 1}
-            loading={s.idx === player.loadingIdx && player.status === "loading"}
-            activeWord={s.idx === player.currentIdx ? player.currentWord : -1}
-            onPlay={handlePlay}
-          />
-        ))}
+        {doc.sentences.map((s) => {
+          const filtered = speakMap.get(s.idx);
+          return (
+            <SentenceItem
+              key={s.idx}
+              sentence={s}
+              displayText={filtered?.text ?? s.text}
+              active={s.idx === player.currentIdx}
+              near={Math.abs(s.idx - player.currentIdx) === 1}
+              loading={s.idx === player.loadingIdx && player.status === "loading"}
+              activeWord={s.idx === player.currentIdx ? player.currentWord : -1}
+              skipped={filtered?.skipped ?? false}
+              clickable={appearance.clickToListen}
+              highlights={highlightsBySentence.get(s.idx) || []}
+              onPlay={handlePlay}
+            />
+          );
+        })}
       </div>
 
       <p className="mt-3 text-center text-xs text-zinc-400">
@@ -639,7 +806,64 @@ export function ReaderView({ docId }: { docId: string }) {
         assistant to explain it
       </p>
 
+      {/* Floating selection toolbar: 1-click highlight + note */}
+      {selection && selAnchor && (
+        <div
+          className="fixed z-40 rounded-xl border border-zinc-200 bg-white p-2 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+          style={{ left: selAnchor.x, top: Math.max(60, selAnchor.y - 8), transform: "translateY(-100%)" }}
+          role="toolbar"
+          aria-label="Highlight selection"
+        >
+          <div className="flex items-center gap-1.5">
+            {HIGHLIGHT_SWATCHES.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => saveHighlight(c.id)}
+                title={`Highlight ${c.id}`}
+                aria-label={`Highlight ${c.id}`}
+                className="h-7 w-7 rounded-full border-2 border-transparent transition-transform hover:scale-110 hover:border-zinc-900 dark:hover:border-white"
+                style={{ backgroundColor: c.swatch }}
+              />
+            ))}
+            <button
+              onClick={() => setHlNoteOpen((v) => !v)}
+              title="Add note"
+              className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium ${hlNoteOpen ? "bg-zinc-200 dark:bg-zinc-700" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+            >
+              <StickyNote size={14} /> Note
+            </button>
+            <button
+              onClick={clearSelection}
+              className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              aria-label="Dismiss"
+            >
+              <X size={15} />
+            </button>
+          </div>
+          {hlNoteOpen && (
+            <div className="mt-2 flex gap-1.5">
+              <input
+                autoFocus
+                value={hlNote}
+                onChange={(e) => setHlNote(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") saveHighlight("yellow");
+                }}
+                placeholder="Add a note, then pick a color…"
+                className="w-56 rounded-lg border border-zinc-300 px-2 py-1.5 text-xs outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       <PlayerBar player={player} doc={doc} onOpenAI={() => openAi("summary")} />
+      <AutoSkipModal
+        open={showAutoSkip}
+        onClose={() => setShowAutoSkip(false)}
+        options={autoSkip}
+        onChange={setAutoSkip}
+      />
       <AIDrawer
         open={aiOpen}
         onClose={() => setAiOpen(false)}
@@ -650,6 +874,8 @@ export function ReaderView({ docId }: { docId: string }) {
         onJump={jumpTo}
         onAddBookmark={addBookmark}
         onDeleteBookmark={deleteBookmark}
+        highlights={highlights}
+        onDeleteHighlight={deleteHighlight}
         initialTab={aiTab}
       />
     </div>

@@ -5,6 +5,9 @@ import type {
   Bookmark,
   DocumentDetail,
   DocumentSummary,
+  Folder,
+  Highlight,
+  HighlightColor,
   Sentence,
   SourceType,
 } from "./types";
@@ -24,6 +27,7 @@ interface DocumentRow {
   voice: string;
   style_prompt: string | null;
   speed: number;
+  folder_id: string | null;
   tags: string;
   progress_sentence_index: number;
   progress_char_offset: number;
@@ -48,6 +52,23 @@ interface BookmarkRow {
   doc_id: string;
   sentence_idx: number;
   note: string | null;
+  created_at: string;
+}
+
+interface HighlightRow {
+  id: string;
+  doc_id: string;
+  sentence_idx: number;
+  text: string;
+  color: string;
+  note: string | null;
+  created_at: string;
+}
+
+interface FolderRow {
+  id: string;
+  name: string;
+  color: string | null;
   created_at: string;
 }
 
@@ -77,6 +98,7 @@ function toSummary(row: DocumentRow): DocumentSummary {
     sentenceCount: row.sentence_count,
     voice: row.voice,
     speed: row.speed,
+    folderId: row.folder_id ?? null,
     tags: parseTags(row.tags),
     progressSentenceIndex: row.progress_sentence_index,
     progressCharOffset: row.progress_char_offset,
@@ -109,6 +131,36 @@ function toBookmark(row: BookmarkRow, preview?: string): Bookmark {
   };
 }
 
+const HIGHLIGHT_COLORS: HighlightColor[] = ["yellow", "blue", "green", "purple", "pink"];
+
+export function normalizeHighlightColor(c: unknown): HighlightColor {
+  return typeof c === "string" && (HIGHLIGHT_COLORS as string[]).includes(c)
+    ? (c as HighlightColor)
+    : "yellow";
+}
+
+function toHighlight(row: HighlightRow): Highlight {
+  return {
+    id: row.id,
+    docId: row.doc_id,
+    sentenceIdx: row.sentence_idx,
+    text: row.text,
+    color: normalizeHighlightColor(row.color),
+    note: row.note,
+    createdAt: row.created_at,
+  };
+}
+
+function toFolder(row: FolderRow, documentCount?: number): Folder {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    createdAt: row.created_at,
+    documentCount,
+  };
+}
+
 export interface CreateDocumentInput {
   title?: string;
   text: string;
@@ -118,6 +170,7 @@ export interface CreateDocumentInput {
   voice?: string;
   stylePrompt?: string | null;
   speed?: number;
+  folderId?: string | null;
   tags?: string[];
 }
 
@@ -141,8 +194,8 @@ export function createDocument(input: CreateDocumentInput): DocumentSummary {
       : getDefaultSpeed();
 
   dbRun(
-    `INSERT INTO documents (id, title, author, source_type, source_url, full_text, total_chars, word_count, sentence_count, voice, style_prompt, speed, tags, progress_sentence_index, progress_char_offset, progress_updated_at, is_archived, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, 0, ?, ?)`,
+    `INSERT INTO documents (id, title, author, source_type, source_url, full_text, total_chars, word_count, sentence_count, voice, style_prompt, speed, folder_id, tags, progress_sentence_index, progress_char_offset, progress_updated_at, is_archived, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, 0, ?, ?)`,
     id,
     title,
     input.author?.trim().slice(0, 300) || null,
@@ -155,6 +208,7 @@ export function createDocument(input: CreateDocumentInput): DocumentSummary {
     voice,
     input.stylePrompt?.trim().slice(0, 1000) || null,
     speed,
+    input.folderId || null,
     JSON.stringify((input.tags || []).filter(Boolean).slice(0, 20)),
     ts,
     ts,
@@ -177,6 +231,8 @@ export interface ListOptions {
   tag?: string;
   sort?: "updated" | "created" | "title" | "progress";
   includeArchived?: boolean;
+  /** "unfiled" filters to folder_id IS NULL; otherwise an exact folder id. */
+  folderId?: string;
 }
 
 export function listDocuments(opts: ListOptions = {}): DocumentSummary[] {
@@ -191,6 +247,12 @@ export function listDocuments(opts: ListOptions = {}): DocumentSummary[] {
   if (opts.tag?.trim()) {
     where.push("tags LIKE ?");
     params.push(`%"${opts.tag.trim()}"%`);
+  }
+  if (opts.folderId === "unfiled") {
+    where.push("folder_id IS NULL");
+  } else if (opts.folderId) {
+    where.push("folder_id = ?");
+    params.push(opts.folderId);
   }
   let order = "updated_at DESC";
   if (opts.sort === "created") order = "created_at DESC";
@@ -215,11 +277,13 @@ export function getDocumentDetail(id: string): DocumentDetail | null {
     id,
   ).map(toSentence);
   const bookmarks = listBookmarks(id);
+  const highlights = listHighlights(id);
   return {
     ...toSummary(row),
     stylePrompt: row.style_prompt,
     sentences,
     bookmarks,
+    highlights,
   };
 }
 
@@ -236,6 +300,7 @@ export interface UpdateDocumentPatch {
   voice?: string;
   stylePrompt?: string | null;
   speed?: number;
+  folderId?: string | null;
   tags?: string[];
   progressSentenceIndex?: number;
   progressCharOffset?: number;
@@ -273,6 +338,18 @@ export function updateDocument(
   ) {
     sets.push("speed = ?");
     params.push(Math.min(4.5, Math.max(0.5, patch.speed)));
+  }
+  if (patch.folderId !== undefined) {
+    if (patch.folderId) {
+      const folder = dbGet<{ id: string }>(
+        "SELECT id FROM folders WHERE id = ?",
+        patch.folderId,
+      );
+      if (!folder) throw new Error("Folder not found.");
+    }
+    sets.push("folder_id = ?");
+    params.push(patch.folderId || null);
+    touchUpdated = true;
   }
   if (patch.tags !== undefined) {
     sets.push("tags = ?");
@@ -379,12 +456,84 @@ export function deleteBookmark(id: string): boolean {
   return dbRun("DELETE FROM bookmarks WHERE id = ?", id).changes > 0;
 }
 
+export function addHighlight(
+  docId: string,
+  sentenceIdx: number,
+  text: string,
+  color?: unknown,
+  note?: string | null,
+): Highlight {
+  const doc = dbGet<DocumentRow>("SELECT * FROM documents WHERE id = ?", docId);
+  if (!doc) throw new Error("Document not found.");
+  const clean = text.trim().slice(0, 2000);
+  if (!clean) throw new Error("Highlight text is empty.");
+  const idx = Math.max(0, Math.min(doc.sentence_count - 1, sentenceIdx));
+  const id = randomUUID();
+  const ts = nowIso();
+  const c = normalizeHighlightColor(color);
+  dbRun(
+    "INSERT INTO highlights (id, doc_id, sentence_idx, text, color, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    id,
+    docId,
+    idx,
+    clean,
+    c,
+    note?.trim().slice(0, 2000) || null,
+    ts,
+  );
+  return {
+    id,
+    docId,
+    sentenceIdx: idx,
+    text: clean,
+    color: c,
+    note: note?.trim() || null,
+    createdAt: ts,
+  };
+}
+
+export function listHighlights(docId: string): Highlight[] {
+  return dbAll<HighlightRow>(
+    "SELECT * FROM highlights WHERE doc_id = ? ORDER BY sentence_idx ASC, created_at ASC",
+    docId,
+  ).map(toHighlight);
+}
+
+export function deleteHighlight(docId: string, id: string): boolean {
+  return (
+    dbRun("DELETE FROM highlights WHERE id = ? AND doc_id = ?", id, docId).changes > 0
+  );
+}
+
+export function createFolder(name: string, color?: string | null): Folder {
+  const clean = name.trim().slice(0, 100);
+  if (!clean) throw new Error("Folder name is required.");
+  const id = randomUUID();
+  const ts = nowIso();
+  dbRun("INSERT INTO folders (id, name, color, created_at) VALUES (?, ?, ?, ?)", id, clean, color?.trim().slice(0, 32) || null, ts);
+  return { id, name: clean, color: color?.trim() || null, createdAt: ts, documentCount: 0 };
+}
+
+export function listFolders(): Folder[] {
+  const rows = dbAll<FolderRow & { document_count: number }>(
+    `SELECT f.*, (SELECT COUNT(*) FROM documents d WHERE d.folder_id = f.id) AS document_count
+     FROM folders f ORDER BY f.name COLLATE NOCASE ASC`,
+  );
+  return rows.map((r) => toFolder(r, r.document_count));
+}
+
+export function deleteFolder(id: string): boolean {
+  dbRun("UPDATE documents SET folder_id = NULL WHERE folder_id = ?", id);
+  return dbRun("DELETE FROM folders WHERE id = ?", id).changes > 0;
+}
+
 export { DEFAULT_VOICE };
 
 export interface ExportData {
   version: 1;
   exportedAt: string;
   documents: DocumentDetail[];
+  folders?: Folder[];
 }
 
 export function exportAllData(): ExportData {
@@ -394,7 +543,7 @@ export function exportAllData(): ExportData {
     const detail = getDocumentDetail(d.id);
     if (detail) details.push(detail);
   }
-  return { version: 1, exportedAt: nowIso(), documents: details };
+  return { version: 1, exportedAt: nowIso(), documents: details, folders: listFolders() };
 }
 
 export function importAllData(data: ExportData): { imported: number; skipped: number } {
@@ -403,6 +552,16 @@ export function importAllData(data: ExportData): { imported: number; skipped: nu
   }
   let imported = 0;
   let skipped = 0;
+  if (Array.isArray(data.folders)) {
+    const fstmt = getDb().prepare(
+      "INSERT OR IGNORE INTO folders (id, name, color, created_at) VALUES (?, ?, ?, ?)",
+    );
+    for (const f of data.folders) {
+      if (f && typeof f.id === "string" && typeof f.name === "string") {
+        fstmt.run(f.id, f.name.slice(0, 100), f.color || null, f.createdAt || nowIso());
+      }
+    }
+  }
   for (const doc of data.documents) {
     if (!doc || typeof doc.id !== "string" || !Array.isArray(doc.sentences)) {
       skipped += 1;
@@ -419,8 +578,8 @@ export function importAllData(data: ExportData): { imported: number; skipped: nu
     const ts = nowIso();
     const fullText = doc.sentences.map((s) => s.text).join(" ");
     dbRun(
-      `INSERT INTO documents (id, title, author, source_type, source_url, full_text, total_chars, word_count, sentence_count, voice, style_prompt, speed, tags, progress_sentence_index, progress_char_offset, progress_updated_at, is_archived, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO documents (id, title, author, source_type, source_url, full_text, total_chars, word_count, sentence_count, voice, style_prompt, speed, folder_id, tags, progress_sentence_index, progress_char_offset, progress_updated_at, is_archived, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       doc.id,
       String(doc.title || "Untitled").slice(0, 300),
       doc.author || null,
@@ -433,6 +592,7 @@ export function importAllData(data: ExportData): { imported: number; skipped: nu
       isValidVoice(doc.voice) ? doc.voice : DEFAULT_VOICE,
       doc.stylePrompt || null,
       doc.speed || 1,
+      doc.folderId || null,
       JSON.stringify(Array.isArray(doc.tags) ? doc.tags : []),
       doc.progressSentenceIndex || 0,
       doc.progressCharOffset || 0,
@@ -454,6 +614,16 @@ export function importAllData(data: ExportData): { imported: number; skipped: nu
       for (const b of doc.bookmarks) {
         if (b && typeof b.id === "string") {
           bstmt.run(b.id, doc.id, b.sentenceIdx || 0, b.note || null, b.createdAt || ts);
+        }
+      }
+    }
+    if (Array.isArray(doc.highlights)) {
+      const hstmt = getDb().prepare(
+        "INSERT OR IGNORE INTO highlights (id, doc_id, sentence_idx, text, color, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      );
+      for (const h of doc.highlights) {
+        if (h && typeof h.id === "string" && typeof h.text === "string") {
+          hstmt.run(h.id, doc.id, h.sentenceIdx || 0, h.text, normalizeHighlightColor(h.color), h.note || null, h.createdAt || ts);
         }
       }
     }

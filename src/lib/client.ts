@@ -7,6 +7,9 @@ import type {
   DocumentDetail,
   DocumentSummary,
   ExtractResult,
+  Folder,
+  Highlight,
+  HighlightColor,
   ModelsResponse,
   OcrResult,
   PodcastEpisode,
@@ -54,12 +57,13 @@ async function send<T>(url: string, method: string, body?: unknown): Promise<T> 
 }
 
 export const api = {
-  listDocuments: (params?: { q?: string; tag?: string; sort?: string; archived?: boolean }) => {
+  listDocuments: (params?: { q?: string; tag?: string; sort?: string; archived?: boolean; folder?: string }) => {
     const sp = new URLSearchParams();
     if (params?.q) sp.set("q", params.q);
     if (params?.tag) sp.set("tag", params.tag);
     if (params?.sort) sp.set("sort", params.sort);
     if (params?.archived) sp.set("archived", "1");
+    if (params?.folder) sp.set("folder", params.folder);
     const qs = sp.toString();
     return get<{ documents: DocumentSummary[]; tags: string[] }>(
       `/api/documents${qs ? `?${qs}` : ""}`,
@@ -135,6 +139,18 @@ export const api = {
     send<Bookmark>(`/api/documents/${docId}/bookmarks`, "POST", { sentenceIdx, note }),
   deleteBookmark: (docId: string, bookmarkId: string) =>
     send<{ ok: boolean }>(`/api/documents/${docId}/bookmarks/${bookmarkId}`, "DELETE"),
+
+  listHighlights: (docId: string) =>
+    get<{ highlights: Highlight[] }>(`/api/documents/${docId}/highlights`),
+  addHighlight: (docId: string, input: { sentenceIdx: number; text: string; color?: HighlightColor; note?: string }) =>
+    send<Highlight>(`/api/documents/${docId}/highlights`, "POST", input),
+  deleteHighlight: (docId: string, highlightId: string) =>
+    send<{ ok: boolean }>(`/api/documents/${docId}/highlights/${highlightId}`, "DELETE"),
+
+  listFolders: () => get<{ folders: Folder[] }>("/api/folders"),
+  createFolder: (name: string, color?: string | null) =>
+    send<Folder>("/api/folders", "POST", { name, color }),
+  deleteFolder: (id: string) => send<{ ok: boolean }>(`/api/folders/${id}`, "DELETE"),
 
   voices: () => get<{ voices: VoiceInfo[]; default: string }>("/api/voices"),
   models: (key?: string) =>

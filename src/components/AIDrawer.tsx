@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Highlighter,
   Loader2,
   Mic,
   RotateCcw,
@@ -21,12 +22,21 @@ import type {
   Bookmark,
   ChatMessage,
   DocumentDetail,
+  Highlight,
   PodcastEpisode,
   QuizResult,
 } from "@/lib/types";
 import { formatDuration } from "@/lib/text";
 
-type DrawerTab = "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks";
+type DrawerTab = "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" | "highlights";
+
+const HIGHLIGHT_BADGE: Record<string, string> = {
+  yellow: "bg-yellow-300 dark:bg-yellow-500",
+  blue: "bg-sky-400 dark:bg-sky-500",
+  green: "bg-emerald-400 dark:bg-emerald-500",
+  purple: "bg-violet-400 dark:bg-violet-500",
+  pink: "bg-rose-400 dark:bg-rose-500",
+};
 
 export interface TextSelection {
   text: string;
@@ -49,6 +59,8 @@ export function AIDrawer({
   onJump,
   onAddBookmark,
   onDeleteBookmark,
+  highlights,
+  onDeleteHighlight,
   initialTab,
 }: {
   open: boolean;
@@ -60,6 +72,8 @@ export function AIDrawer({
   onJump: (idx: number) => void;
   onAddBookmark: (note: string) => void;
   onDeleteBookmark: (id: string) => void;
+  highlights: Highlight[];
+  onDeleteHighlight: (id: string) => void;
   initialTab?: DrawerTab;
 }) {
   const [tab, setTab] = useState<DrawerTab>(initialTab || "summary");
@@ -280,6 +294,7 @@ export function AIDrawer({
     { id: "cards", label: "Cards" },
     { id: "podcast", label: "Podcast" },
     { id: "bookmarks", label: `Saved (${bookmarks.length})` },
+    { id: "highlights", label: `Highlights (${highlights.length})` },
   ];
 
   return (
@@ -717,6 +732,60 @@ export function AIDrawer({
                     </button>
                   ))}
                 </div>
+              )}
+            </div>
+          )}
+
+          {tab === "highlights" && (
+            <div className="space-y-3">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                Highlights &amp; notes for “{doc.title}”. Select text in the
+                reader to add one.
+              </p>
+              {highlights.length === 0 ? (
+                <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
+                  No highlights yet. Select any passage in the reader and pick
+                  a color.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {highlights.map((h) => (
+                    <li
+                      key={h.id}
+                      className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800"
+                    >
+                      <button
+                        onClick={() => onJump(h.sentenceIdx)}
+                        className="block w-full text-left"
+                      >
+                        <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                          <span
+                            className={`inline-block h-3 w-3 rounded-full ${HIGHLIGHT_BADGE[h.color] || HIGHLIGHT_BADGE.yellow}`}
+                            aria-hidden="true"
+                          />
+                          Sentence {h.sentenceIdx + 1}
+                        </span>
+                        <span className="mt-1 flex items-start gap-1.5 text-sm">
+                          <Highlighter size={14} className="mt-0.5 shrink-0 text-zinc-400" />
+                          <span className="line-clamp-3">“{h.text}”</span>
+                        </span>
+                        {h.note && (
+                          <span className="mt-1.5 block rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                            {h.note}
+                          </span>
+                        )}
+                      </button>
+                      <div className="mt-1.5 flex justify-end">
+                        <button
+                          onClick={() => onDeleteHighlight(h.id)}
+                          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-red-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950 dark:hover:text-red-400"
+                        >
+                          <Trash2 size={13} /> Remove
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
           )}
