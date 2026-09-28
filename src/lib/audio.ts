@@ -4,7 +4,7 @@ import path from "path";
 
 export function audioKey(text: string, voice: string, style: string): string {
   return createHash("sha256")
-    .update(JSON.stringify({ v: 1, text, voice, style: style || "" }))
+    .update(JSON.stringify({ v: 2, text, voice, style: style || "" }))
     .digest("hex");
 }
 
@@ -67,13 +67,65 @@ export function wavDurationMs(wav: Buffer): number {
   return Math.round((info.dataSize / bytesPerSecond) * 1000);
 }
 
-/** Wrap raw PCM16 mono audio in a WAV container. */
+/**
+ * Smooth PCM16 audio:
+ * 1. Extracts raw PCM if input was already wrapped in a WAV container.
+ * 2. Enforces 16-bit 2-byte alignment.
+ * 3. Applies a smooth micro fade-in (5ms) and fade-out (25ms) window to
+ *    eliminate clicks, pops, DC offset snaps, and quantization static at the end.
+ */
+export function smoothPcm16(rawInput: Buffer, sampleRate: number): Buffer {
+  let pcm = rawInput;
+  // If Gemini already returned a RIFF WAV container, extract the pure PCM payload
+  if (pcm.length >= 44 && pcm.toString("ascii", 0, 4) === "RIFF") {
+    const info = parseWavHeader(pcm);
+    if (info) {
+      pcm = pcm.subarray(info.headerSize, info.headerSize + info.dataSize);
+    }
+  }
+
+  // Ensure 16-bit boundary alignment
+  const alignedLen = pcm.length - (pcm.length % 2);
+  if (alignedLen < 4) return Buffer.alloc(0);
+  const out = Buffer.from(pcm.subarray(0, alignedLen));
+  const totalSamples = alignedLen / 2;
+
+  // Micro fade-in (5ms) to prevent boundary click
+  const fadeInSamples = Math.min(
+    Math.floor(totalSamples / 4),
+    Math.round(sampleRate * 0.005),
+  );
+  for (let i = 0; i < fadeInSamples; i++) {
+    const offset = i * 2;
+    const sample = out.readInt16LE(offset);
+    const factor = Math.sin((i / fadeInSamples) * (Math.PI / 2));
+    out.writeInt16LE(Math.round(sample * factor), offset);
+  }
+
+  // Smooth fade-out (25ms) to eliminate static / pop / DC drop at sentence end
+  const fadeOutSamples = Math.min(
+    Math.floor(totalSamples / 2),
+    Math.round(sampleRate * 0.025),
+  );
+  for (let i = 0; i < fadeOutSamples; i++) {
+    const sampleIdx = totalSamples - fadeOutSamples + i;
+    const offset = sampleIdx * 2;
+    const sample = out.readInt16LE(offset);
+    const factor = Math.cos((i / fadeOutSamples) * (Math.PI / 2));
+    out.writeInt16LE(Math.round(sample * factor), offset);
+  }
+
+  return out;
+}
+
+/** Wrap raw PCM16 mono audio in a WAV container with smoothing. */
 export function pcmToWav(
-  pcm: Buffer,
+  pcmInput: Buffer,
   sampleRate: number,
   channels = 1,
   bitsPerSample = 16,
 ): Buffer {
+  const pcm = smoothPcm16(pcmInput, sampleRate);
   const header = Buffer.alloc(44);
   const byteRate = (sampleRate * channels * bitsPerSample) / 8;
   const blockAlign = (channels * bitsPerSample) / 8;
