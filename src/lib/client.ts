@@ -1,0 +1,156 @@
+// Client-side API helpers (fetch wrappers) + small formatters.
+
+import type {
+  Bookmark,
+  CacheStats,
+  DocumentDetail,
+  DocumentSummary,
+  ExtractResult,
+  OcrResult,
+  PublicSettings,
+  TtsResponse,
+  VoiceInfo,
+} from "./types";
+
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status = 500) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+async function parse<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let message = `Request failed (HTTP ${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body?.error) message = body.error;
+    } catch {
+      // keep default
+    }
+    throw new ApiError(message, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+async function get<T>(url: string): Promise<T> {
+  return parse<T>(await fetch(url, { cache: "no-store" }));
+}
+
+async function send<T>(url: string, method: string, body?: unknown): Promise<T> {
+  return parse<T>(
+    await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  );
+}
+
+export const api = {
+  listDocuments: (params?: { q?: string; tag?: string; sort?: string; archived?: boolean }) => {
+    const sp = new URLSearchParams();
+    if (params?.q) sp.set("q", params.q);
+    if (params?.tag) sp.set("tag", params.tag);
+    if (params?.sort) sp.set("sort", params.sort);
+    if (params?.archived) sp.set("archived", "1");
+    const qs = sp.toString();
+    return get<{ documents: DocumentSummary[]; tags: string[] }>(
+      `/api/documents${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getDocument: (id: string) => get<DocumentDetail>(`/api/documents/${id}`),
+  createDocument: (input: {
+    title?: string;
+    text: string;
+    sourceType?: string;
+    sourceUrl?: string | null;
+    author?: string | null;
+    voice?: string;
+    tags?: string[];
+  }) => send<DocumentSummary>("/api/documents", "POST", input),
+  updateDocument: (id: string, patch: Record<string, unknown>) =>
+    send<DocumentSummary>(`/api/documents/${id}`, "PATCH", patch),
+  deleteDocument: (id: string) =>
+    send<{ ok: boolean }>(`/api/documents/${id}`, "DELETE"),
+
+  tts: (input: { text: string; voice?: string; stylePrompt?: string }) =>
+    send<TtsResponse>("/api/tts", "POST", input),
+
+  extractFile: async (file: File, opts?: { cleanup?: boolean; ocrMode?: string }) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts?.cleanup) form.append("cleanup", "1");
+    if (opts?.ocrMode) form.append("ocrMode", opts.ocrMode);
+    const res = await fetch("/api/extract", { method: "POST", body: form });
+    return parse<ExtractResult>(res);
+  },
+  extractUrl: async (url: string, cleanup?: boolean) => {
+    const form = new FormData();
+    form.append("url", url);
+    if (cleanup) form.append("cleanup", "1");
+    const res = await fetch("/api/extract", { method: "POST", body: form });
+    return parse<ExtractResult>(res);
+  },
+
+  ocr: async (file: File, opts?: { mode?: string; cleanup?: boolean }) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (opts?.mode) form.append("mode", opts.mode);
+    if (opts?.cleanup) form.append("cleanup", "1");
+    const res = await fetch("/api/ocr", { method: "POST", body: form });
+    return parse<OcrResult & { cleaned?: string }>(res);
+  },
+
+  summarize: (input: { documentId?: string; title?: string; text?: string; length?: "short" | "detailed" }) =>
+    send<{ summary: string }>("/api/ai/summary", "POST", input),
+  explain: (selection: string, context?: string) =>
+    send<{ explanation: string }>("/api/ai/explain", "POST", { selection, context }),
+  cleanup: (text: string) => send<{ text: string }>("/api/ai/cleanup", "POST", { text }),
+
+  listBookmarks: (docId: string) =>
+    get<{ bookmarks: Bookmark[] }>(`/api/documents/${docId}/bookmarks`),
+  addBookmark: (docId: string, sentenceIdx: number, note?: string) =>
+    send<Bookmark>(`/api/documents/${docId}/bookmarks`, "POST", { sentenceIdx, note }),
+  deleteBookmark: (docId: string, bookmarkId: string) =>
+    send<{ ok: boolean }>(`/api/documents/${docId}/bookmarks/${bookmarkId}`, "DELETE"),
+
+  voices: () => get<{ voices: VoiceInfo[]; default: string }>("/api/voices"),
+  settings: () => get<PublicSettings>("/api/settings"),
+  updateSettings: (patch: Record<string, unknown>) =>
+    send<PublicSettings>("/api/settings", "PUT", patch),
+  cacheStats: () => get<CacheStats>("/api/cache"),
+  clearCache: () => send<{ ok: boolean; removed: number; bytes: number }>("/api/cache", "DELETE"),
+  importData: (data: unknown) => send<{ ok: boolean; imported: number; skipped: number }>("/api/data/import", "POST", data),
+};
+
+export function formatBytes(bytes: number): string {
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
+export function downloadTextFile(filename: string, text: string, mime = "text/plain"): void {
+  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function safeFilename(name: string, ext: string): string {
+  const base = name.replace(/[^\w\d-_]+/g, "_").slice(0, 80) || "vocalflow";
+  return `${base}.${ext}`;
+}
