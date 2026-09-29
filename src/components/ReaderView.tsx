@@ -27,7 +27,12 @@ import {
   useState,
 } from "react";
 import { usePlayer } from "@/hooks/usePlayer";
-import { api } from "@/lib/client";
+import { api, formatBytes } from "@/lib/client";
+import {
+  getOfflineDocument,
+  isDocumentOnDevice,
+  removeDocumentFromDevice,
+} from "@/lib/offlineStore";
 import { applyAutoSkip, loadAutoSkip, saveAutoSkip, type AutoSkipOptions } from "@/lib/autoSkip";
 import { estimateTtsCostUsd, formatUsd } from "@/lib/pricing";
 import {
@@ -45,6 +50,7 @@ import type {
   Sentence,
 } from "@/lib/types";
 import { AIDrawer, type TextSelection } from "./AIDrawer";
+import { DownloadToDeviceModal } from "./DownloadToDeviceModal";
 import { PrerenderModal } from "./PrerenderModal";
 import {
   AppearanceMenu,
@@ -239,6 +245,13 @@ export function ReaderView({ docId }: { docId: string }) {
   const [highlights, setHighlights] = useState<Highlight[]>([]);
   const [prerenderOpen, setPrerenderOpen] = useState(false);
   const [prerenderStats, setPrerenderStats] = useState<PrerenderStats | null>(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [onDevice, setOnDevice] = useState<{
+    onDevice: boolean;
+    bytes: number;
+    downloadedAt?: string;
+  } | null>(null);
   const articleRef = useRef<HTMLDivElement>(null);
   const { openShortcuts, shortcutsOpen } = useUI();
 
@@ -268,6 +281,7 @@ export function ReaderView({ docId }: { docId: string }) {
     let live = true;
     setLoading(true);
     setLoadError(null);
+    setOfflineMode(false);
     api
       .getDocument(docId)
       .then((d) => {
@@ -277,7 +291,21 @@ export function ReaderView({ docId }: { docId: string }) {
         setHighlights(d.highlights || []);
         setLoading(false);
       })
-      .catch((e) => {
+      .catch(async (e) => {
+        // Server unreachable: fall back to the on-device copy, if any.
+        try {
+          const offline = await getOfflineDocument(docId);
+          if (offline && live) {
+            setDoc(offline);
+            setBookmarks(offline.bookmarks);
+            setHighlights(offline.highlights || []);
+            setOfflineMode(true);
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // Ignore and report the original load failure below.
+        }
         if (!live) return;
         setLoadError(e instanceof Error ? e.message : "Failed to load document.");
         setLoading(false);
@@ -286,6 +314,35 @@ export function ReaderView({ docId }: { docId: string }) {
       live = false;
     };
   }, [docId]);
+
+  const refreshOnDevice = useCallback(() => {
+    isDocumentOnDevice(docId)
+      .then(setOnDevice)
+      .catch(() => {});
+  }, [docId]);
+
+  useEffect(() => {
+    refreshOnDevice();
+  }, [refreshOnDevice]);
+
+  const handleDeviceButton = useCallback(() => {
+    if (onDevice?.onDevice) {
+      if (
+        !confirm(
+          "Remove this book from device storage? You can re-download it anytime.",
+        )
+      ) {
+        return;
+      }
+      removeDocumentFromDevice(docId)
+        .then(() => refreshOnDevice())
+        .catch((e) =>
+          alert(e instanceof Error ? e.message : "Could not remove download."),
+        );
+    } else {
+      setDownloadOpen(true);
+    }
+  }, [onDevice, docId, refreshOnDevice]);
 
   const refreshPrerenderStats = useCallback(() => {
     api.getPrerenderStats(docId).then(setPrerenderStats).catch(() => {});
@@ -738,6 +795,26 @@ export function ReaderView({ docId }: { docId: string }) {
           <Mic size={15} />
           <span className="hidden sm:inline">🎙️ Podcast</span>
         </button>
+        <button
+          onClick={handleDeviceButton}
+          className={`flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold ${
+            onDevice?.onDevice
+              ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:hover:bg-emerald-900"
+              : "bg-sky-100 text-sky-900 hover:bg-sky-200 dark:bg-sky-950/70 dark:text-sky-300 dark:hover:bg-sky-900"
+          }`}
+          aria-label={
+            onDevice?.onDevice
+              ? "Remove this book from device storage"
+              : "Download this book to the device"
+          }
+          title={
+            onDevice?.onDevice
+              ? `Saved on this device (${formatBytes(onDevice.bytes)}) — click to remove`
+              : "Download book + audio to this device for offline listening"
+          }
+        >
+          📱<span className="hidden sm:inline">{onDevice?.onDevice ? "Saved" : "Download"}</span>
+        </button>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
@@ -774,6 +851,22 @@ export function ReaderView({ docId }: { docId: string }) {
             <Highlighter size={12} />
             {highlights.length} highlight{highlights.length === 1 ? "" : "s"}
           </button>
+        )}
+        {onDevice?.onDevice && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white dark:bg-emerald-500 dark:text-zinc-950"
+            title={`Saved on this device (${formatBytes(onDevice.bytes)}) — reads and plays with no network`}
+          >
+            📱 Offline Ready
+          </span>
+        )}
+        {offlineMode && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full bg-amber-500 px-2.5 py-1 text-[11px] font-semibold text-white dark:bg-amber-500 dark:text-zinc-950"
+            title="Server unreachable — reading and listening from the on-device copy"
+          >
+            Offline — playing from this device
+          </span>
         )}
       </div>
 
@@ -907,6 +1000,16 @@ export function ReaderView({ docId }: { docId: string }) {
             refreshPrerenderStats();
           }}
           onDone={setPrerenderStats}
+        />
+      )}
+      {downloadOpen && (
+        <DownloadToDeviceModal
+          doc={{ ...doc, voice: player.voice, stylePrompt: player.stylePrompt }}
+          onClose={() => {
+            setDownloadOpen(false);
+            refreshOnDevice();
+          }}
+          onDone={refreshOnDevice}
         />
       )}
       <AIDrawer

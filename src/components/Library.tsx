@@ -21,7 +21,13 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, downloadTextFile, safeFilename } from "@/lib/client";
+import { api, downloadTextFile, formatBytes, safeFilename } from "@/lib/client";
+import {
+  getOfflineDocument,
+  listOfflineDocuments,
+  removeDocumentFromDevice,
+  saveDocumentToDevice,
+} from "@/lib/offlineStore";
 import type { DocumentSummary, Folder, SourceType } from "@/lib/types";
 import { useUI } from "./AppShell";
 import { Modal } from "./Modal";
@@ -104,6 +110,14 @@ export function Library() {
   const [newFolderColor, setNewFolderColor] = useState(FOLDER_COLORS[5]);
   const [folderBusy, setFolderBusy] = useState(false);
   const [prerenderDoc, setPrerenderDoc] = useState<DocumentSummary | null>(null);
+  const [deviceMap, setDeviceMap] = useState<
+    Record<string, { bytes: number; downloadedAt: string }>
+  >({});
+  const [onDeviceOnly, setOnDeviceOnly] = useState(false);
+  const [deviceProg, setDeviceProg] = useState<
+    Record<string, { done: number; total: number; bytes: number }>
+  >({});
+  const [offlineLib, setOfflineLib] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 300);
@@ -119,9 +133,23 @@ export function Library() {
     }
   }, []);
 
+  const refreshDeviceMap = useCallback(async () => {
+    try {
+      const offline = await listOfflineDocuments();
+      const map: Record<string, { bytes: number; downloadedAt: string }> = {};
+      for (const o of offline) {
+        map[o.id] = { bytes: o.bytes, downloadedAt: o.downloadedAt };
+      }
+      setDeviceMap(map);
+    } catch {
+      // Device storage unreadable; on-device badges stay hidden.
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setOfflineLib(false);
     try {
       const res = await api.listDocuments({
         q: debouncedQ || undefined,
@@ -133,6 +161,36 @@ export function Library() {
       setDocs(res.documents);
       setTags(res.tags);
     } catch (e) {
+      // Server unreachable: fall back to books stored on this device.
+      try {
+        const offline = await listOfflineDocuments();
+        if (offline.length > 0) {
+          const details = await Promise.all(
+            offline.map((o) => getOfflineDocument(o.id)),
+          );
+          const summaries: DocumentSummary[] = [];
+          for (const d of details) {
+            if (!d) continue;
+            const {
+              sentences: _sentences,
+              bookmarks: _bookmarks,
+              highlights: _highlights,
+              stylePrompt: _stylePrompt,
+              ...summary
+            } = d;
+            summaries.push(summary);
+          }
+          if (summaries.length > 0) {
+            setDocs(summaries);
+            setTags([]);
+            setOfflineLib(true);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {
+        // Fall through to the error state below.
+      }
       setError(e instanceof Error ? e.message : "Failed to load library.");
     } finally {
       setLoading(false);
@@ -147,7 +205,48 @@ export function Library() {
     void refreshFolders();
   }, [refreshFolders]);
 
-  const filtered = useMemo(() => docs, [docs]);
+  useEffect(() => {
+    void refreshDeviceMap();
+  }, [refreshDeviceMap]);
+
+  const filtered = useMemo(
+    () => (onDeviceOnly ? docs.filter((d) => deviceMap[d.id]) : docs),
+    [docs, onDeviceOnly, deviceMap],
+  );
+
+  const onDeviceCount = useMemo(
+    () => Object.keys(deviceMap).length,
+    [deviceMap],
+  );
+
+  async function downloadToDevice(doc: DocumentSummary) {
+    if (deviceProg[doc.id]) return;
+    setDeviceProg((p) => ({ ...p, [doc.id]: { done: 0, total: 0, bytes: 0 } }));
+    try {
+      const detail = await api.getDocument(doc.id);
+      await saveDocumentToDevice(detail, (done, total, bytes) => {
+        setDeviceProg((p) => ({ ...p, [doc.id]: { done, total, bytes } }));
+      });
+      await refreshDeviceMap();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Download to device failed.");
+    } finally {
+      setDeviceProg((p) => {
+        const next = { ...p };
+        delete next[doc.id];
+        return next;
+      });
+    }
+  }
+
+  async function removeFromDevice(id: string) {
+    try {
+      await removeDocumentFromDevice(id);
+      await refreshDeviceMap();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Could not remove download.");
+    }
+  }
 
   async function removeDoc(id: string, title: string) {
     if (!confirm(`Delete "${title}"? This removes the document, progress and bookmarks. Cached audio is kept.`)) {
@@ -303,6 +402,22 @@ export function Library() {
         >
           Unfiled
         </button>
+        <button
+          onClick={() => setOnDeviceOnly((v) => !v)}
+          role="tab"
+          aria-selected={onDeviceOnly}
+          className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+            onDeviceOnly
+              ? "bg-emerald-600 text-white dark:bg-emerald-500 dark:text-zinc-950"
+              : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+          }`}
+          title="Show only books stored on this device"
+        >
+          📱 On Device
+          {onDeviceCount > 0 && (
+            <span className="opacity-70">({onDeviceCount})</span>
+          )}
+        </button>
         {folders.map((f) => (
           <span
             key={f.id}
@@ -382,6 +497,13 @@ export function Library() {
         </div>
       </div>
 
+      {offlineLib && (
+        <div className="mb-3 rounded-lg bg-amber-100 px-3 py-2 text-xs font-medium text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
+          Server unreachable — showing books stored on this device. Reading
+          and listening work fully offline.
+        </div>
+      )}
+
       {tags.length > 0 && (
         <div className="mb-4 flex gap-1.5 overflow-x-auto pb-1">
           <button
@@ -422,6 +544,24 @@ export function Library() {
           </button>
         </div>
       ) : filtered.length === 0 ? (
+        onDeviceOnly ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 px-4 py-14 text-center dark:border-zinc-700">
+            <div className="text-3xl">📱</div>
+            <div>
+              <p className="font-semibold">No books on this device yet</p>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Use “📱 Download to Device” on any book to read and listen
+                with no network connection.
+              </p>
+            </div>
+            <button
+              onClick={() => setOnDeviceOnly(false)}
+              className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+            >
+              Show all documents
+            </button>
+          </div>
+        ) : (
         <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 px-4 py-14 text-center dark:border-zinc-700">
           <BookOpen size={32} className="text-zinc-400" />
           <div>
@@ -437,6 +577,7 @@ export function Library() {
             <Plus size={16} /> Import something
           </button>
         </div>
+        )
       ) : (
         <div
           className={
@@ -535,6 +676,41 @@ export function Library() {
                     <span className="shrink-0 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
                       {pct}%
                     </span>
+                  </div>
+                  <div className="mt-1.5">
+                    {deviceProg[doc.id] ? (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium tabular-nums text-sky-800 dark:bg-sky-950/70 dark:text-sky-300"
+                        aria-live="polite"
+                      >
+                        <Loader2 size={11} className="animate-spin" />
+                        📱 {deviceProg[doc.id].done.toLocaleString()}/
+                        {deviceProg[doc.id].total.toLocaleString()} clips (
+                        {formatBytes(deviceProg[doc.id].bytes)})
+                      </span>
+                    ) : deviceMap[doc.id] ? (
+                      <button
+                        onClick={() => void removeFromDevice(doc.id)}
+                        className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:hover:bg-emerald-900"
+                        title={`Saved on this device (${formatBytes(deviceMap[doc.id].bytes)}) — click to remove`}
+                      >
+                        📱 On Device ({formatBytes(deviceMap[doc.id].bytes)}) ·{" "}
+                        <X size={11} />
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => void downloadToDevice(doc)}
+                        disabled={offlineLib}
+                        className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 hover:bg-sky-100 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-sky-950 dark:hover:text-sky-300"
+                        title={
+                          offlineLib
+                            ? "Reconnect to download this book to the device"
+                            : "Download book + audio to this device"
+                        }
+                      >
+                        📱 Download to Device
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div

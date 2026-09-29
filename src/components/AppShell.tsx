@@ -61,6 +61,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Register the PWA service worker (offline audio + assets).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch((err) => {
+      console.warn("Service worker registration failed:", err);
+    });
+  }, []);
+
   // Global "?" (Shift+/) toggles the shortcuts cheat sheet.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

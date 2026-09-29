@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
+import { offlineAudioUrl } from "@/lib/offlineStore";
 import type { DocumentDetail } from "@/lib/types";
 
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "error";
@@ -220,20 +221,43 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       if (hit) return Promise.resolve(hit);
       const pending = inflightRef.current.get(key);
       if (pending) return pending;
-      const p = api
-        .tts({
+      const p = (async (): Promise<Clip> => {
+        // Offline-first: when the sentence has device-cached audio for the
+        // current voice, serve it straight from CacheStorage with no
+        // server connection (the service worker serves the request).
+        const sentence = docRef.current?.sentences[idx];
+        const hash = sentence?.audioHash;
+        const voiceMatches =
+          voiceRef.current === docRef.current?.voice &&
+          (styleRef.current || "") ===
+            (docRef.current?.stylePrompt || "");
+        if (hash && voiceMatches && typeof caches !== "undefined") {
+          try {
+            const offlineUrl = offlineAudioUrl(hash);
+            const cached = await caches.match(offlineUrl);
+            if (cached) {
+              const clip = {
+                url: offlineUrl,
+                durationMs: sentence?.audioDurationMs ?? 0,
+              };
+              cacheRef.current.set(key, clip);
+              return clip;
+            }
+          } catch {
+            // Fall through to the network path.
+          }
+        }
+        const res = await api.tts({
           text: speak,
           voice: voiceRef.current,
           stylePrompt: styleRef.current || undefined,
-        })
-        .then((res) => {
-          const clip = { url: res.url, durationMs: res.durationMs };
-          cacheRef.current.set(key, clip);
-          return clip;
-        })
-        .finally(() => {
-          inflightRef.current.delete(key);
         });
+        const clip = { url: res.url, durationMs: res.durationMs };
+        cacheRef.current.set(key, clip);
+        return clip;
+      })().finally(() => {
+        inflightRef.current.delete(key);
+      });
       inflightRef.current.set(key, p);
       return p;
     },
