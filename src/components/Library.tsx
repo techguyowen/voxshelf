@@ -17,6 +17,7 @@ import {
   Search,
   Trash2,
   X,
+  Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -24,6 +25,7 @@ import { api, downloadTextFile, safeFilename } from "@/lib/client";
 import type { DocumentSummary, Folder, SourceType } from "@/lib/types";
 import { useUI } from "./AppShell";
 import { Modal } from "./Modal";
+import { PrerenderModal } from "./PrerenderModal";
 
 const FOLDER_COLORS = [
   "#64748b",
@@ -101,6 +103,7 @@ export function Library() {
   const [newFolderName, setNewFolderName] = useState("");
   const [newFolderColor, setNewFolderColor] = useState(FOLDER_COLORS[5]);
   const [folderBusy, setFolderBusy] = useState(false);
+  const [prerenderDoc, setPrerenderDoc] = useState<DocumentSummary | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 300);
@@ -472,6 +475,21 @@ export function Library() {
                         {folders.find((f) => f.id === doc.folderId)?.name || "Folder"}
                       </span>
                     )}
+                    {doc.prerenderPct === 100 ? (
+                      <span
+                        className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
+                        title="All sentences have cached audio — ready for offline listening"
+                      >
+                        <Zap size={11} /> Offline Ready
+                      </span>
+                    ) : typeof doc.prerenderPct === "number" && doc.prerenderPct > 0 ? (
+                      <span
+                        className="flex shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                        title={`${doc.prerenderPct}% of sentences have cached audio`}
+                      >
+                        <Zap size={11} /> {doc.prerenderPct}%
+                      </span>
+                    ) : null}
                     <span className="ml-auto shrink-0 text-[11px] text-zinc-400">
                       {timeAgo(doc.updatedAt)}
                     </span>
@@ -545,6 +563,15 @@ export function Library() {
                       </option>
                     ))}
                   </select>
+                  <button
+                    onClick={() => setPrerenderDoc(doc)}
+                    disabled={busyId === doc.id}
+                    className="rounded-lg p-1.5 text-zinc-500 hover:bg-amber-100 hover:text-amber-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-amber-950 dark:hover:text-amber-300"
+                    title="Pre-render full audio"
+                    aria-label={`Pre-render full audio for "${doc.title}"`}
+                  >
+                    <Zap size={16} />
+                  </button>
                   <button
                     onClick={() => void exportDoc(doc, "txt")}
                     disabled={busyId === doc.id}
@@ -638,6 +665,18 @@ export function Library() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {prerenderDoc && (
+        <PrerenderModal
+          docId={prerenderDoc.id}
+          title={prerenderDoc.title}
+          currentIdx={prerenderDoc.progressSentenceIndex}
+          onClose={() => {
+            setPrerenderDoc(null);
+            void refresh();
+          }}
+        />
       )}
     </div>
   );

@@ -15,6 +15,7 @@ import {
   TriangleAlert,
   Type,
   X,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -39,10 +40,12 @@ import type {
   DocumentDetail,
   Highlight,
   HighlightColor,
+  PrerenderStats,
   ReaderPrefs,
   Sentence,
 } from "@/lib/types";
 import { AIDrawer, type TextSelection } from "./AIDrawer";
+import { PrerenderModal } from "./PrerenderModal";
 import {
   AppearanceMenu,
   appearanceFontClass,
@@ -234,6 +237,8 @@ export function ReaderView({ docId }: { docId: string }) {
   const [hlNoteOpen, setHlNoteOpen] = useState(false);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const [prerenderOpen, setPrerenderOpen] = useState(false);
+  const [prerenderStats, setPrerenderStats] = useState<PrerenderStats | null>(null);
   const articleRef = useRef<HTMLDivElement>(null);
   const { openShortcuts, shortcutsOpen } = useUI();
 
@@ -281,6 +286,14 @@ export function ReaderView({ docId }: { docId: string }) {
       live = false;
     };
   }, [docId]);
+
+  const refreshPrerenderStats = useCallback(() => {
+    api.getPrerenderStats(docId).then(setPrerenderStats).catch(() => {});
+  }, [docId]);
+
+  useEffect(() => {
+    refreshPrerenderStats();
+  }, [refreshPrerenderStats]);
 
   const persistProgress = useCallback(
     (sentenceIdx: number, charOffset: number) => {
@@ -697,6 +710,26 @@ export function ReaderView({ docId }: { docId: string }) {
           <Keyboard size={19} />
         </button>
         <button
+          onClick={() => setPrerenderOpen(true)}
+          className={`flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold ${
+            prerenderStats?.isFullyCached
+              ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:hover:bg-emerald-900"
+              : "bg-amber-100 text-amber-900 hover:bg-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:hover:bg-amber-900"
+          }`}
+          aria-label="Pre-render offline audio"
+          title={
+            prerenderStats
+              ? `Offline audio: ${prerenderStats.percentCached}% cached — click to pre-render`
+              : "Pre-render offline audio"
+          }
+        >
+          <Zap size={15} />
+          <span className="tabular-nums">
+            {prerenderStats ? `${prerenderStats.percentCached}%` : "…"}
+          </span>
+          <span className="hidden sm:inline">Pre-render</span>
+        </button>
+        <button
           onClick={() => openAi("podcast")}
           className="flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-2 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
           aria-label="Generate AI podcast"
@@ -864,6 +897,18 @@ export function ReaderView({ docId }: { docId: string }) {
         options={autoSkip}
         onChange={setAutoSkip}
       />
+      {prerenderOpen && (
+        <PrerenderModal
+          docId={doc.id}
+          title={doc.title}
+          currentIdx={player.currentIdx}
+          onClose={() => {
+            setPrerenderOpen(false);
+            refreshPrerenderStats();
+          }}
+          onDone={setPrerenderStats}
+        />
+      )}
       <AIDrawer
         open={aiOpen}
         onClose={() => setAiOpen(false)}

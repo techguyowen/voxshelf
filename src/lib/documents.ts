@@ -86,7 +86,9 @@ export function parseTags(json: string | null): string[] {
   }
 }
 
-function toSummary(row: DocumentRow): DocumentSummary {
+function toSummary(row: DocumentRow & { cached_sentences?: number }): DocumentSummary {
+  const cached =
+    typeof row.cached_sentences === "number" ? row.cached_sentences : undefined;
   return {
     id: row.id,
     title: row.title,
@@ -96,6 +98,10 @@ function toSummary(row: DocumentRow): DocumentSummary {
     totalChars: row.total_chars,
     wordCount: row.word_count,
     sentenceCount: row.sentence_count,
+    prerenderPct:
+      cached === undefined || row.sentence_count <= 0
+        ? undefined
+        : Math.min(100, Math.round((cached / row.sentence_count) * 100)),
     voice: row.voice,
     speed: row.speed,
     folderId: row.folder_id ?? null,
@@ -258,8 +264,8 @@ export function listDocuments(opts: ListOptions = {}): DocumentSummary[] {
   if (opts.sort === "created") order = "created_at DESC";
   else if (opts.sort === "title") order = "title COLLATE NOCASE ASC";
   else if (opts.sort === "progress") order = "progress_updated_at DESC";
-  const sql = `SELECT * FROM documents${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY ${order} LIMIT 500`;
-  return dbAll<DocumentRow>(sql, ...params).map(toSummary);
+  const sql = `SELECT documents.*, (SELECT COUNT(*) FROM sentences s WHERE s.doc_id = documents.id AND s.audio_hash IS NOT NULL) AS cached_sentences FROM documents${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY ${order} LIMIT 500`;
+  return dbAll<DocumentRow & { cached_sentences: number }>(sql, ...params).map(toSummary);
 }
 
 export function listAllTags(): string[] {
@@ -406,6 +412,39 @@ export function updateSentenceAudio(
     docId,
     idx,
   );
+}
+
+export interface PrerenderStatsRow {
+  totalSentences: number;
+  cachedSentences: number;
+  percentCached: number;
+  totalDurationMs: number;
+  isFullyCached: boolean;
+}
+
+/** Offline-readiness stats for a document. Null when the document is missing. */
+export function getPrerenderStats(docId: string): PrerenderStatsRow | null {
+  const doc = dbGet<{ sentence_count: number }>(
+    "SELECT sentence_count FROM documents WHERE id = ?",
+    docId,
+  );
+  if (!doc) return null;
+  const row = dbGet<{ cached: number; duration: number }>(
+    `SELECT COUNT(CASE WHEN audio_hash IS NOT NULL THEN 1 END) AS cached,
+            COALESCE(SUM(audio_duration_ms), 0) AS duration
+     FROM sentences WHERE doc_id = ?`,
+    docId,
+  );
+  const total = doc.sentence_count;
+  const cached = row?.cached ?? 0;
+  return {
+    totalSentences: total,
+    cachedSentences: cached,
+    percentCached:
+      total > 0 ? Math.min(100, Math.round((cached / total) * 100)) : 0,
+    totalDurationMs: row?.duration ?? 0,
+    isFullyCached: total > 0 && cached >= total,
+  };
 }
 
 export function addBookmark(

@@ -13,6 +13,10 @@ import type {
   ModelsResponse,
   OcrResult,
   PodcastEpisode,
+  PrerenderCompleteEvent,
+  PrerenderEvent,
+  PrerenderOptions,
+  PrerenderStats,
   PublicSettings,
   QuizResult,
   TtsResponse,
@@ -86,6 +90,80 @@ export const api = {
 
   tts: (input: { text: string; voice?: string; stylePrompt?: string }) =>
     send<TtsResponse>("/api/tts", "POST", input),
+
+  getPrerenderStats: (docId: string) =>
+    get<PrerenderStats>(`/api/documents/${docId}/prerender`),
+
+  /**
+   * Stream a pre-render job. Resolves with the final `complete` summary.
+   * Pass an AbortSignal to pause/cancel mid-run.
+   */
+  prerenderStream: async (
+    docId: string,
+    options: PrerenderOptions,
+    onEvent: (event: PrerenderEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<PrerenderCompleteEvent> => {
+    const res = await fetch(`/api/documents/${docId}/prerender`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options),
+      signal,
+    });
+    if (!res.ok) {
+      let message = `Pre-render failed (HTTP ${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body?.error) message = body.error;
+      } catch {
+        // keep default
+      }
+      throw new ApiError(message, res.status);
+    }
+    if (!res.body) throw new ApiError("Pre-render stream is empty.", 500);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let summary: PrerenderCompleteEvent | null = null;
+
+    const handleFrame = (frame: string) => {
+      for (const line of frame.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data:")) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload) continue;
+        try {
+          const event = JSON.parse(payload) as PrerenderEvent;
+          if (event.type === "complete") summary = event;
+          onEvent(event);
+        } catch {
+          // Ignore malformed frames; the stream continues.
+        }
+      }
+    };
+
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        handleFrame(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        boundary = buffer.indexOf("\n\n");
+      }
+    }
+    if (buffer.trim()) handleFrame(buffer);
+
+    if (!summary) {
+      throw new ApiError(
+        signal?.aborted ? "Pre-render was cancelled." : "Pre-render ended without a summary.",
+        signal?.aborted ? 499 : 500,
+      );
+    }
+    return summary;
+  },
 
   extractFile: async (file: File, opts?: { cleanup?: boolean; ocrMode?: string }) => {
     const form = new FormData();

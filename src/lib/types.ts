@@ -59,6 +59,8 @@ export interface DocumentSummary {
   totalChars: number;
   wordCount: number;
   sentenceCount: number;
+  /** 0-100 share of sentences with cached audio (present on list responses). */
+  prerenderPct?: number;
   voice: string;
   speed: number;
   folderId: string | null;
@@ -201,6 +203,63 @@ export interface PodcastEpisode {
   transcriptDocId: string | null;
   createdAt: string;
 }
+
+export interface PrerenderStats {
+  totalSentences: number;
+  cachedSentences: number;
+  percentCached: number;
+  totalDurationMs: number;
+  isFullyCached: boolean;
+}
+
+export interface PrerenderOptions {
+  startIndex?: number;
+  count?: number;
+  voice?: string;
+  stylePrompt?: string;
+  concurrency?: number;
+}
+
+export interface PrerenderStartEvent {
+  type: "start";
+  total: number;
+  startIndex: number;
+  voice: string;
+}
+
+export interface PrerenderProgressEvent {
+  type: "progress";
+  sentenceIdx: number;
+  completed: number;
+  total: number;
+  cached: boolean;
+  durationMs: number;
+  textPreview: string;
+}
+
+export interface PrerenderErrorEvent {
+  type: "error";
+  sentenceIdx: number;
+  completed: number;
+  total: number;
+  message: string;
+  textPreview: string;
+}
+
+export interface PrerenderCompleteEvent {
+  type: "complete";
+  total: number;
+  synthesized: number;
+  cached: number;
+  failed: number;
+  totalDurationMs: number;
+}
+
+export type PrerenderEvent =
+  | PrerenderStartEvent
+  | PrerenderProgressEvent
+  | PrerenderErrorEvent
+  | PrerenderCompleteEvent;
 
 export type ReaderFont = "sans" | "serif" | "mono" | "dyslexic";
 
