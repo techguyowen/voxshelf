@@ -81,9 +81,13 @@ No subscriptions, no artificial paywalls, and no telemetry. Just a fast, reliabl
 
 ## Screenshots
 
-| Library | Karaoke Reader | AI Assistant |
-| ------- | -------------- | ------------ |
-| Document shelf with format badges (PDF, EPUB, Article, Scan), reading progress indicators, folder organization, search, and sorting. | Sentence-by-sentence karaoke highlighting with dimmed focus ruler, custom font controls, and sticky floating bottom player. | Context drawer with summaries, explainers, document Q&A, active-recall quizzes, and 2-host podcast generator. |
+| Shelf & Library | Karaoke Reader |
+| :---: | :---: |
+| ![VoxShelf Library](docs/screenshots/library.png) | ![VoxShelf Karaoke Reader](docs/screenshots/reader.png) |
+
+| AI Assistant Drawer | Mobile Reader View |
+| :---: | :---: |
+| ![VoxShelf AI Assistant](docs/screenshots/ai-drawer.png) | ![VoxShelf Mobile View](docs/screenshots/mobile.png) |
 
 ---
 
