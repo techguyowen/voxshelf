@@ -1,14 +1,14 @@
-/* VocalFlow PWA service worker — on-device offline audio + asset support.
+/* VoxShelf PWA service worker — on-device offline audio + asset support.
  *
- * - Cache-first for /api/audio/* from `vocalflow-offline-audio-v1`
+ * - Cache-first for /api/audio/* from `voxshelf-offline-audio-v1`
  *   (populated by the in-app "Download to Device" flow). Served straight
  *   from the browser cache with no server connection required.
  * - Stale-while-revalidate for static assets (_next/static, fonts, icons).
  * - Network-first for navigations with a friendly offline fallback page.
  */
 
-const AUDIO_CACHE = "vocalflow-offline-audio-v1";
-const STATIC_CACHE = "vocalflow-static-v1";
+const AUDIO_CACHE = "voxshelf-offline-audio-v1";
+const STATIC_CACHE = "voxshelf-static-v1";
 
 self.addEventListener("install", () => {
   // Take over immediately so offline audio works without a reload.
@@ -26,7 +26,8 @@ self.addEventListener("activate", (event) => {
             (n) =>
               n !== AUDIO_CACHE &&
               n !== STATIC_CACHE &&
-              n.startsWith("vocalflow-"),
+              // "vocalflow-" covers caches from the pre-rename releases.
+              (n.startsWith("voxshelf-") || n.startsWith("vocalflow-")),
           )
           .map((n) => caches.delete(n)),
       );
@@ -39,7 +40,7 @@ function offlinePage() {
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VocalFlow — Offline</title>
+<title>VoxShelf — Offline</title>
 <style>
   body{font-family:system-ui,sans-serif;background:#09090b;color:#e4e4e7;
     display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center}
@@ -52,7 +53,7 @@ function offlinePage() {
 <body><main>
   <div style="font-size:2.5rem">📱</div>
   <h1>You're offline</h1>
-  <p>The VocalFlow server is unreachable. Books you saved with
+  <p>The VoxShelf server is unreachable. Books you saved with
   &ldquo;Download to Device&rdquo; are still available &mdash; go back to the
   library and open one from the &ldquo;📱 On Device&rdquo; tab.</p>
   <a href="/">Back to library</a>

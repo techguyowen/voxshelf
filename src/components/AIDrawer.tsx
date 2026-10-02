@@ -2,9 +2,14 @@
 
 import {
   Bookmark as BookmarkIcon,
+  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Download,
+  Edit2,
+  FileDown,
   Highlighter,
   Loader2,
   Mic,
@@ -17,12 +22,14 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/lib/client";
+import { api, downloadTextFile, safeFilename } from "@/lib/client";
+import { useToast } from "./Toast";
 import type {
   Bookmark,
   ChatMessage,
   DocumentDetail,
   Highlight,
+  HighlightColor,
   PodcastEpisode,
   QuizResult,
 } from "@/lib/types";
@@ -61,6 +68,7 @@ export function AIDrawer({
   onDeleteBookmark,
   highlights,
   onDeleteHighlight,
+  onUpdateHighlight,
   initialTab,
 }: {
   open: boolean;
@@ -74,6 +82,7 @@ export function AIDrawer({
   onDeleteBookmark: (id: string) => void;
   highlights: Highlight[];
   onDeleteHighlight: (id: string) => void;
+  onUpdateHighlight?: (id: string, patch: { note?: string | null; color?: HighlightColor }) => void;
   initialTab?: DrawerTab;
 }) {
   const [tab, setTab] = useState<DrawerTab>(initialTab || "summary");
@@ -106,6 +115,147 @@ export function AIDrawer({
   const [podcastLoaded, setPodcastLoaded] = useState(false);
   const [saveTranscript, setSaveTranscript] = useState(false);
   const [activeEpisode, setActiveEpisode] = useState<PodcastEpisode | null>(null);
+
+  // Highlight audio-clip downloads
+  const [clipBusy, setClipBusy] = useState<string | null>(null);
+
+  // Bottom-sheet drag-to-close (mobile).
+  const dragStartY = useRef<number | null>(null);
+  const [dragY, setDragY] = useState(0);
+  const onSheetTouchStart = (e: React.TouchEvent) => {
+    if (!window.matchMedia("(max-width: 639px)").matches) return;
+    const t = e.touches[0];
+    dragStartY.current = t ? t.clientY : null;
+  };
+  const onSheetTouchMove = (e: React.TouchEvent) => {
+    if (dragStartY.current === null) return;
+    const t = e.touches[0];
+    if (!t) return;
+    const dy = t.clientY - dragStartY.current;
+    setDragY(dy > 0 ? dy : 0);
+  };
+  const onSheetTouchEnd = () => {
+    if (dragStartY.current === null) return;
+    const shouldClose = dragY > 90;
+    dragStartY.current = null;
+    setDragY(0);
+    if (shouldClose) onClose();
+  };
+
+  // Highlight copy & edit state
+  const toast = useToast();
+  const [copiedAll, setCopiedAll] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [editingHlId, setEditingHlId] = useState<string | null>(null);
+  const [editingNoteText, setEditingNoteText] = useState("");
+
+  function getHighlightContext(h: Highlight) {
+    const total = doc.sentenceCount || doc.sentences.length || 1;
+    const pct = Math.round(((h.sentenceIdx + 1) / total) * 100);
+    const prev = doc.sentences[h.sentenceIdx - 1]?.text;
+    const curr = doc.sentences[h.sentenceIdx]?.text;
+    const next = doc.sentences[h.sentenceIdx + 1]?.text;
+    const surrounding = [prev, curr, next].filter(Boolean).join(" ");
+    return {
+      sentenceNum: h.sentenceIdx + 1,
+      total,
+      pct,
+      surrounding,
+    };
+  }
+
+  function formatSingleHighlightWithContext(h: Highlight) {
+    const { sentenceNum, total, pct, surrounding } = getHighlightContext(h);
+    const lines = [
+      `### Sentence ${sentenceNum} of ${total} (${pct}%) • [${h.color.toUpperCase()}]`,
+      ``,
+      `> "${h.text}"`,
+      ``,
+    ];
+    if (surrounding && surrounding !== h.text) {
+      lines.push(`**Surrounding Context:**`, `> *${surrounding}*`, ``);
+    }
+    if (h.note) {
+      lines.push(`💬 **Note:** ${h.note}`, ``);
+    }
+    lines.push(`*From: "${doc.title}" • Added: ${new Date(h.createdAt).toLocaleString()}*`);
+    return lines.join("\n");
+  }
+
+  async function copyAllNotesWithContext() {
+    const sorted = [...highlights].sort((a, b) => a.sentenceIdx - b.sentenceIdx);
+    const total = doc.sentenceCount || doc.sentences.length || 1;
+    const header = [
+      `# Notes & Highlights: ${doc.title}`,
+      doc.author ? `**Author:** ${doc.author}` : null,
+      doc.sourceUrl ? `**Source:** ${doc.sourceUrl}` : null,
+      `**Total Highlights:** ${highlights.length} | **Bookmarks:** ${bookmarks.length}`,
+      `*Exported from VoxShelf on ${new Date().toLocaleString()}*`,
+      ``,
+      `---`,
+      ``,
+    ].filter(Boolean);
+
+    const hlBlocks = sorted.map((h, i) => {
+      const { sentenceNum, pct, surrounding } = getHighlightContext(h);
+      const part = [
+        `### ${i + 1}. Sentence ${sentenceNum} of ${total} (${pct}%) • [${h.color.toUpperCase()}]`,
+        ``,
+        `> "${h.text}"`,
+        ``,
+      ];
+      if (surrounding && surrounding !== h.text) {
+        part.push(`**Surrounding Context:**`, `> *${surrounding}*`, ``);
+      }
+      if (h.note) {
+        part.push(`💬 **Note:** ${h.note}`, ``);
+      }
+      return part.join("\n");
+    });
+
+    const content = [...header, hlBlocks.join("\n\n---\n\n")].join("\n");
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedAll(true);
+      toast.success("Copied all notes with context.");
+      setTimeout(() => setCopiedAll(false), 2200);
+    } catch {
+      setError("Failed to copy to clipboard.");
+      toast.error("Failed to copy to clipboard.");
+    }
+  }
+
+  async function copySingleHighlight(h: Highlight) {
+    const text = formatSingleHighlightWithContext(h);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(h.id);
+      toast.success("Copied with context.");
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      setError("Failed to copy to clipboard.");
+      toast.error("Failed to copy to clipboard.");
+    }
+  }
+
+  function startEditHighlight(h: Highlight) {
+    setEditingHlId(h.id);
+    setEditingNoteText(h.note || "");
+  }
+
+  async function saveEditHighlight(id: string) {
+    const note = editingNoteText.trim() || null;
+    try {
+      if (onUpdateHighlight) {
+        onUpdateHighlight(id, { note });
+      } else {
+        await api.updateHighlight(doc.id, id, { note });
+      }
+      setEditingHlId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to update note.");
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -284,6 +434,54 @@ export function AIDrawer({
     : 0;
   const answered = Object.keys(answers).length;
 
+  function exportHighlightsMarkdown() {
+    const sorted = [...highlights].sort((a, b) => a.sentenceIdx - b.sentenceIdx);
+    const lines: string[] = [
+      `# ${doc.title} — Highlights`,
+      ``,
+      `*Exported from VoxShelf on ${new Date().toLocaleString()}*`,
+      ``,
+    ];
+    for (const h of sorted) {
+      lines.push(`## Sentence ${h.sentenceIdx + 1} (${h.color})`, ``);
+      for (const line of h.text.split("\n")) lines.push(`> ${line}`);
+      lines.push(``);
+      if (h.note) lines.push(`**Note:** ${h.note}`, ``);
+    }
+    downloadTextFile(
+      safeFilename(`${doc.title}-highlights`, "md"),
+      lines.join("\n"),
+      "text/markdown",
+    );
+  }
+
+  async function downloadHighlightAudio(h: Highlight) {
+    if (clipBusy) return;
+    setClipBusy(h.id);
+    setError(null);
+    try {
+      const sentence = doc.sentences[h.sentenceIdx];
+      let hash = sentence?.audioHash ?? null;
+      if (!hash) {
+        const res = await api.tts({
+          text: (sentence?.text ?? h.text).slice(0, 4000),
+          voice: doc.voice,
+        });
+        hash = res.hash;
+      }
+      const a = document.createElement("a");
+      a.href = `/api/audio/${hash}`;
+      a.download = safeFilename(`${doc.title}-s${h.sentenceIdx + 1}`, "wav");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Audio download failed.");
+    } finally {
+      setClipBusy(null);
+    }
+  }
+
   if (!open) return null;
 
   const tabs: { id: DrawerTab; label: string }[] = [
@@ -299,9 +497,34 @@ export function AIDrawer({
 
   return (
     <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="AI assistant">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} aria-hidden="true" />
-      <aside className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-white shadow-xl animate-fade-up dark:bg-zinc-900">
-        <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <aside
+        className="absolute inset-x-0 bottom-0 flex max-h-[92dvh] w-full flex-col rounded-t-2xl bg-white shadow-xl animate-fade-up dark:bg-zinc-900 sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-0 sm:h-full sm:max-h-none sm:w-full sm:max-w-md sm:rounded-none"
+        style={
+          dragY > 0
+            ? { transform: `translateY(${dragY}px)`, transition: "none" }
+            : undefined
+        }
+      >
+        <div
+          className="flex shrink-0 items-center justify-center pt-2.5 sm:hidden"
+          onTouchStart={onSheetTouchStart}
+          onTouchMove={onSheetTouchMove}
+          onTouchEnd={onSheetTouchEnd}
+          aria-hidden="true"
+        >
+          <span className="h-1.5 w-12 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+        </div>
+        <div
+          className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800"
+          onTouchStart={onSheetTouchStart}
+          onTouchMove={onSheetTouchMove}
+          onTouchEnd={onSheetTouchEnd}
+        >
           <h2 className="flex items-center gap-1.5 text-base font-semibold">
             <Sparkles size={17} className="text-emerald-600 dark:text-emerald-400" />
             AI Assistant
@@ -331,7 +554,7 @@ export function AIDrawer({
           ))}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           {error && (
             <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-300">
               {error}
@@ -600,20 +823,34 @@ export function AIDrawer({
                 <>
                   <button
                     onClick={() => setCardFlipped((f) => !f)}
-                    className="flex min-h-[12rem] w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-zinc-200 bg-zinc-50 p-6 text-center transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-800/40"
+                    className="vf-flip block w-full text-center"
                     aria-label={cardFlipped ? "Show concept" : "Reveal explanation"}
                   >
-                    <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">
-                      {cardFlipped ? "Explanation" : "Concept"} · {cardIdx + 1}/
-                      {quiz.flashcards.length}
-                    </span>
-                    <span className="text-base font-semibold leading-relaxed">
-                      {cardFlipped
-                        ? quiz.flashcards[cardIdx].back
-                        : quiz.flashcards[cardIdx].front}
-                    </span>
-                    <span className="mt-2 text-xs text-zinc-400">
-                      Tap to flip
+                    <span
+                      className={`vf-flip-inner${cardFlipped ? " vf-flipped" : ""}`}
+                    >
+                      <span className="vf-flip-face flex min-h-[12rem] w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-zinc-200 bg-zinc-50 p-6 transition-colors hover:border-emerald-400 dark:border-zinc-800 dark:bg-zinc-800/40">
+                        <span className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                          Concept · {cardIdx + 1}/{quiz.flashcards.length}
+                        </span>
+                        <span className="text-base font-semibold leading-relaxed">
+                          {quiz.flashcards[cardIdx].front}
+                        </span>
+                        <span className="mt-2 text-xs text-zinc-400">
+                          Tap to flip
+                        </span>
+                      </span>
+                      <span className="vf-flip-face vf-flip-back flex min-h-[12rem] w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-emerald-400 bg-emerald-50 p-6 dark:border-emerald-700 dark:bg-emerald-950/40">
+                        <span className="text-xs font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                          Explanation · {cardIdx + 1}/{quiz.flashcards.length}
+                        </span>
+                        <span className="text-base font-semibold leading-relaxed">
+                          {quiz.flashcards[cardIdx].back}
+                        </span>
+                        <span className="mt-2 text-xs text-emerald-600/70 dark:text-emerald-400/70">
+                          Tap to flip back
+                        </span>
+                      </span>
                     </span>
                   </button>
                   <div className="flex items-center justify-between">
@@ -742,49 +979,159 @@ export function AIDrawer({
                 Highlights &amp; notes for “{doc.title}”. Select text in the
                 reader to add one.
               </p>
+              {highlights.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    onClick={() => void copyAllNotesWithContext()}
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400 shadow-sm transition-colors"
+                    title="Copy all highlights and notes with surrounding context to clipboard"
+                  >
+                    {copiedAll ? (
+                      <>
+                        <Check size={14} className="text-white dark:text-zinc-950" /> Copied with Context!
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={14} /> Copy All Notes (with Context)
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={exportHighlightsMarkdown}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 transition-colors"
+                    title="Export all highlights and notes as Markdown for Obsidian / Notion"
+                  >
+                    <FileDown size={14} /> Export to Markdown (.md)
+                  </button>
+                </div>
+              )}
               {highlights.length === 0 ? (
                 <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
                   No highlights yet. Select any passage in the reader and pick
-                  a color.
+                  a color to save notes.
                 </p>
               ) : (
-                <ul className="space-y-2">
-                  {highlights.map((h) => (
-                    <li
-                      key={h.id}
-                      className="rounded-xl border border-zinc-200 p-3 dark:border-zinc-800"
-                    >
-                      <button
-                        onClick={() => onJump(h.sentenceIdx)}
-                        className="block w-full text-left"
+                <ul className="space-y-2.5">
+                  {highlights.map((h) => {
+                    const isEditing = editingHlId === h.id;
+                    const isCopied = copiedId === h.id;
+                    return (
+                      <li
+                        key={h.id}
+                        className="rounded-xl border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-900/50 shadow-sm"
                       >
-                        <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                          <span
-                            className={`inline-block h-3 w-3 rounded-full ${HIGHLIGHT_BADGE[h.color] || HIGHLIGHT_BADGE.yellow}`}
-                            aria-hidden="true"
-                          />
-                          Sentence {h.sentenceIdx + 1}
-                        </span>
-                        <span className="mt-1 flex items-start gap-1.5 text-sm">
-                          <Highlighter size={14} className="mt-0.5 shrink-0 text-zinc-400" />
-                          <span className="line-clamp-3">“{h.text}”</span>
-                        </span>
-                        {h.note && (
-                          <span className="mt-1.5 block rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs leading-relaxed text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-                            {h.note}
-                          </span>
-                        )}
-                      </button>
-                      <div className="mt-1.5 flex justify-end">
                         <button
-                          onClick={() => onDeleteHighlight(h.id)}
-                          className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-red-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950 dark:hover:text-red-400"
+                          onClick={() => onJump(h.sentenceIdx)}
+                          className="block w-full text-left"
                         >
-                          <Trash2 size={13} /> Remove
+                          <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                            <span
+                              className={`inline-block h-2.5 w-2.5 rounded-full ${HIGHLIGHT_BADGE[h.color] || HIGHLIGHT_BADGE.yellow}`}
+                              aria-hidden="true"
+                            />
+                            Sentence {h.sentenceIdx + 1}
+                            <span className="text-[10px] font-normal text-zinc-400">
+                              · {Math.round(((h.sentenceIdx + 1) / (doc.sentenceCount || 1)) * 100)}% through
+                            </span>
+                          </span>
+                          <span className="mt-1 flex items-start gap-1.5 text-sm leading-snug">
+                            <Highlighter size={14} className="mt-0.5 shrink-0 text-zinc-400" />
+                            <span className="line-clamp-3 font-serif italic text-zinc-800 dark:text-zinc-200">“{h.text}”</span>
+                          </span>
                         </button>
-                      </div>
-                    </li>
-                  ))}
+
+                        {isEditing ? (
+                          <div className="mt-2 space-y-2 rounded-lg bg-zinc-50 p-2.5 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800">
+                            <textarea
+                              autoFocus
+                              value={editingNoteText}
+                              onChange={(e) => setEditingNoteText(e.target.value)}
+                              placeholder="Add or edit your note / thoughts for this passage…"
+                              rows={2}
+                              className="w-full rounded-md border border-zinc-300 p-2 text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100"
+                            />
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={() => setEditingHlId(null)}
+                                className="rounded px-2.5 py-1 text-xs text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-800"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => void saveEditHighlight(h.id)}
+                                className="rounded bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950"
+                              >
+                                Save Note
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          h.note && (
+                            <div
+                              onClick={() => startEditHighlight(h)}
+                              className="mt-1.5 cursor-pointer rounded-lg bg-amber-50/80 px-2.5 py-1.5 text-xs leading-relaxed text-amber-900 transition-colors hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/60 border border-amber-200/50 dark:border-amber-900/40"
+                              title="Click to edit note"
+                            >
+                              <span className="font-semibold text-amber-700 dark:text-amber-400 mr-1">Note:</span>
+                              {h.note}
+                            </div>
+                          )
+                        )}
+
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-1 pt-1 border-t border-zinc-100 dark:border-zinc-800/80">
+                          <button
+                            onClick={() => void copySingleHighlight(h)}
+                            className="flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                            title="Copy this note + quote with surrounding context"
+                          >
+                            {isCopied ? (
+                              <>
+                                <Check size={12} className="text-emerald-600 dark:text-emerald-400" />
+                                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy size={12} />
+                                <span>Copy with Context</span>
+                              </>
+                            )}
+                          </button>
+
+                          <div className="flex items-center gap-1">
+                            {!isEditing && (
+                              <button
+                                onClick={() => startEditHighlight(h)}
+                                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                                title={h.note ? "Edit note" : "Add note"}
+                              >
+                                <Edit2 size={12} /> {h.note ? "Edit" : "+ Note"}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => void downloadHighlightAudio(h)}
+                              disabled={clipBusy === h.id}
+                              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+                              title="Download this sentence's audio as WAV"
+                            >
+                              {clipBusy === h.id ? (
+                                <Loader2 size={12} className="animate-spin" />
+                              ) : (
+                                <Download size={12} />
+                              )}
+                              Audio
+                            </button>
+                            <button
+                              onClick={() => onDeleteHighlight(h.id)}
+                              className="flex items-center gap-1 rounded px-2 py-1 text-xs text-zinc-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-400"
+                              title="Delete highlight"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

@@ -872,7 +872,7 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Modal title="Import to VocalFlow" onClose={onClose} wide>
+    <Modal title="Import to VoxShelf" onClose={onClose} wide>
       <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
         {TABS.map((t) => (
           <button

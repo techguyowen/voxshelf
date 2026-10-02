@@ -9,8 +9,8 @@ import {
   type ReactNode,
 } from "react";
 
-export type Theme = "light" | "dark";
-export type ThemeMode = "system" | "light" | "dark";
+export type Theme = "light" | "dark" | "oled";
+export type ThemeMode = "system" | "light" | "dark" | "oled";
 
 function resolveSystem(): Theme {
   if (
@@ -40,8 +40,14 @@ export function useTheme() {
 
 function loadMode(): ThemeMode {
   try {
-    const stored = localStorage.getItem("vf-theme");
-    if (stored === "light" || stored === "dark" || stored === "system") {
+    const stored =
+      localStorage.getItem("vs-theme") || localStorage.getItem("vf-theme");
+    if (
+      stored === "light" ||
+      stored === "dark" ||
+      stored === "oled" ||
+      stored === "system"
+    ) {
       return stored;
     }
   } catch {
@@ -70,9 +76,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [mode]);
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
+    // OLED is a dark variant: keep the `dark` class so every dark: utility
+    // applies, and add `oled` for the pure-black overrides in globals.css.
+    document.documentElement.classList.toggle("dark", theme !== "light");
+    document.documentElement.classList.toggle("oled", theme === "oled");
     try {
-      localStorage.setItem("vf-theme", mode);
+      localStorage.setItem("vs-theme", mode);
     } catch {
       // private mode etc.
     }
@@ -81,6 +90,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const toggle = useCallback(() => {
     setModeState((m) => {
       if (m === "system") return resolveSystem() === "dark" ? "light" : "dark";
+      if (m === "oled") return "light";
       return m === "dark" ? "light" : "dark";
     });
   }, []);

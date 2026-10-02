@@ -1,4 +1,4 @@
-// Rule-based (and AI-enhanced heuristic) auto-skip engine for VocalFlow.
+// Rule-based (and AI-enhanced heuristic) auto-skip engine for VoxShelf.
 // Strips boilerplate from speech audio: headers, footers, footnotes, tables,
 // formulas, citations, URLs, and parenthetical/bracketed/braced asides.
 
@@ -34,11 +34,13 @@ export const DEFAULT_AUTOSKIP: AutoSkipOptions = {
   skipBraces: false,
 };
 
-const AUTOSKIP_KEY = "vf-autoskip";
+const AUTOSKIP_KEY = "vs-autoskip";
+const LEGACY_AUTOSKIP_KEY = "vf-autoskip";
 
 export function loadAutoSkip(): AutoSkipOptions {
   try {
-    const raw = localStorage.getItem(AUTOSKIP_KEY);
+    const raw =
+      localStorage.getItem(AUTOSKIP_KEY) ?? localStorage.getItem(LEGACY_AUTOSKIP_KEY);
     if (!raw) return DEFAULT_AUTOSKIP;
     const parsed = JSON.parse(raw) as Partial<AutoSkipOptions>;
     return { ...DEFAULT_AUTOSKIP, ...parsed };

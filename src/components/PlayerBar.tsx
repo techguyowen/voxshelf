@@ -12,10 +12,23 @@ import {
   SkipForward,
   Sparkles,
   Timer,
+  Volume1,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client";
+import { getSharedAudio } from "@/lib/globalPlayer";
+import { haptic } from "@/lib/haptics";
+import {
+  VOLUME_CHANGE_EVENT,
+  loadMuted,
+  loadVolume,
+  saveMuted,
+  saveVolume,
+} from "@/lib/volume";
+import { VoicePreviewButton } from "./VoicePreviewButton";
 import {
   cumulativeWordCounts,
   formatTimeLeftBadge,
@@ -28,6 +41,150 @@ function formatSleep(totalSeconds: number): string {
   const m = Math.floor(totalSeconds / 60);
   const s = totalSeconds % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+const SPEED_STEPS = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5];
+
+const STYLE_PRESETS: { label: string; prompt: string }[] = [
+  { label: "🎙️ Documentary Narrator", prompt: "Deep, authoritative, cinematic documentary narrator" },
+  { label: "🌙 Bedtime Story", prompt: "Warm, gentle, soothing, calm bedtime story tone" },
+  { label: "⚡ Energetic News", prompt: "Crisp, engaging, fast-paced news broadcast voice" },
+  { label: "💼 Tech Lecturer", prompt: "Clear, precise, professional academic lecture pace" },
+  { label: "🎭 Dramatic Story", prompt: "Expressive, rich, emotive storytelling with vocal range" },
+];
+
+/** Animated 3-bar equalizer shown while audio is playing. */
+function Equalizer() {
+  return (
+    <span className="vf-eq" aria-hidden="true">
+      <span className="vf-eq-bar" style={{ animationDelay: "0ms" }} />
+      <span className="vf-eq-bar" style={{ animationDelay: "0.22s" }} />
+      <span className="vf-eq-bar" style={{ animationDelay: "0.44s" }} />
+    </span>
+  );
+}
+
+/**
+ * Volume icon button with a hover/touch popover slider (0-100%). Clicking
+ * the icon toggles mute; dragging the slider sets the shared audio element's
+ * volume. Both persist to localStorage.
+ */
+function VolumeControl({ iconBtn }: { iconBtn: string }) {
+  const [volume, setVolume] = useState<number>(() =>
+    typeof window === "undefined" ? 1 : loadVolume(),
+  );
+  const [muted, setMuted] = useState<boolean>(() =>
+    typeof window === "undefined" ? false : loadMuted(),
+  );
+  const [open, setOpen] = useState(false);
+  const lastAudible = useRef(volume > 0 ? volume : 0.8);
+
+  useEffect(() => {
+    setVolume(loadVolume());
+    setMuted(loadMuted());
+  }, []);
+
+  // External mute toggles (e.g. the "M" keyboard shortcut) sync back here.
+  useEffect(() => {
+    const sync = () => {
+      setVolume(loadVolume());
+      setMuted(loadMuted());
+    };
+    window.addEventListener(VOLUME_CHANGE_EVENT, sync);
+    return () => window.removeEventListener(VOLUME_CHANGE_EVENT, sync);
+  }, []);
+
+  useEffect(() => {
+    if (volume > 0) lastAudible.current = volume;
+    const audio = getSharedAudio();
+    if (audio) {
+      try {
+        audio.volume = volume;
+        audio.muted = muted;
+      } catch {
+        // ignore
+      }
+    }
+    saveVolume(volume);
+    saveMuted(muted);
+  }, [volume, muted]);
+
+  const silent = muted || volume === 0;
+  const Icon = silent ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+
+  const toggleMute = () => {
+    haptic();
+    if (muted || volume === 0) {
+      // Unmute: restore the last audible level when sitting at zero.
+      if (volume === 0) setVolume(lastAudible.current);
+      setMuted(false);
+    } else {
+      setMuted(true);
+    }
+  };
+
+  const onIconClick = () => {
+    // Touch devices have no hover: the first tap reveals the slider instead
+    // of instantly muting, so the popover stays reachable.
+    const touchOnly =
+      typeof window !== "undefined" &&
+      window.matchMedia("(hover: none)").matches;
+    if (touchOnly && !open) {
+      setOpen(true);
+      return;
+    }
+    toggleMute();
+  };
+
+  return (
+    <div
+      className="relative shrink-0"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        onClick={onIconClick}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setOpen(false);
+        }}
+        className={iconBtn}
+        aria-label={silent ? "Unmute" : "Mute"}
+        title={silent ? "Unmute" : "Mute"}
+        aria-expanded={open}
+      >
+        <Icon size={20} />
+      </button>
+      <div
+        className={`absolute bottom-full right-0 mb-1 flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 shadow-xl transition-opacity dark:border-zinc-700 dark:bg-zinc-900 ${
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        role="group"
+        aria-label="Volume"
+      >
+        <Icon size={16} className="shrink-0 text-zinc-500 dark:text-zinc-400" />
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={Math.round(volume * 100)}
+          onChange={(e) => {
+            const v = Number(e.target.value) / 100;
+            setVolume(v);
+            if (v > 0) setMuted(false);
+          }}
+          className="h-11 w-28 cursor-pointer"
+          aria-label="Volume"
+          aria-valuetext={`${Math.round(volume * 100)} percent${muted ? ", muted" : ""}`}
+          tabIndex={open ? 0 : -1}
+        />
+        <span className="w-9 shrink-0 text-right text-xs font-semibold tabular-nums text-zinc-600 dark:text-zinc-300">
+          {muted ? "Muted" : `${Math.round(volume * 100)}%`}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 export function PlayerBar({
@@ -74,7 +231,10 @@ export function PlayerBar({
   const timeLeftLabel = formatTimeLeftBadge(wordsLeft, player.speed);
 
   const iconBtn =
-    "rounded-full p-2.5 text-zinc-700 hover:bg-zinc-200/70 dark:text-zinc-200 dark:hover:bg-zinc-800";
+    "flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full p-2.5 text-zinc-700 hover:bg-zinc-200/70 dark:text-zinc-200 dark:hover:bg-zinc-800";
+
+  const currentTone =
+    voices.find((v) => v.name === player.voice)?.description ?? "";
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
@@ -92,7 +252,7 @@ export function PlayerBar({
         />
       </div>
 
-      <div className="mx-auto w-full max-w-3xl px-3 pb-[max(0.6rem,env(safe-area-inset-bottom))] pt-2">
+      <div className="mx-auto w-full max-w-3xl px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
         {player.error && (
           <div className="mb-2 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-700 dark:bg-red-950/50 dark:text-red-300">
             <span className="flex-1 truncate">{player.error}</span>
@@ -107,11 +267,22 @@ export function PlayerBar({
         )}
 
         <div className="flex items-center gap-0.5 sm:gap-1">
-          <button onClick={player.prev} className={iconBtn} aria-label="Previous sentence" title="Previous sentence">
+          <button
+            onClick={() => {
+              haptic();
+              player.prev();
+            }}
+            className={iconBtn}
+            aria-label="Previous sentence"
+            title="Previous sentence"
+          >
             <SkipBack size={20} />
           </button>
           <button
-            onClick={() => void player.skip(-15)}
+            onClick={() => {
+              haptic();
+              void player.skip(-15);
+            }}
             className={`${iconBtn} relative`}
             aria-label="Back 15 seconds"
             title="Back 15s"
@@ -122,7 +293,10 @@ export function PlayerBar({
             </span>
           </button>
           <button
-            onClick={player.toggle}
+            onClick={() => {
+              haptic();
+              player.toggle();
+            }}
             className="mx-1 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-70 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
             aria-label={playing ? "Pause" : "Play"}
             title={playing ? "Pause" : "Play"}
@@ -136,7 +310,10 @@ export function PlayerBar({
             )}
           </button>
           <button
-            onClick={() => void player.skip(15)}
+            onClick={() => {
+              haptic();
+              void player.skip(15);
+            }}
             className={`${iconBtn} relative`}
             aria-label="Forward 15 seconds"
             title="Forward 15s"
@@ -146,7 +323,15 @@ export function PlayerBar({
               15
             </span>
           </button>
-          <button onClick={player.next} className={iconBtn} aria-label="Next sentence" title="Next sentence">
+          <button
+            onClick={() => {
+              haptic();
+              player.next();
+            }}
+            className={iconBtn}
+            aria-label="Next sentence"
+            title="Next sentence"
+          >
             <SkipForward size={20} />
           </button>
 
@@ -162,17 +347,28 @@ export function PlayerBar({
                 <Timer size={11} />
                 {timeLeftLabel}
               </span>
-              {player.sleepLeft !== null && (
+              {player.sleepLeft !== null ? (
                 <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
-                  <Timer size={11} />
-                  {formatSleep(player.sleepLeft)}
+                  ⏳ {formatSleep(player.sleepLeft)}
                 </span>
+              ) : (
+                player.sleepEndOfDoc && (
+                  <span className="ml-1.5 inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                    <Timer size={11} />
+                    End of doc
+                  </span>
+                )
               )}
             </p>
-            <p className="truncate text-xs font-medium">
-              {doc.sentences[player.currentIdx]?.text.slice(0, 80) || doc.title}
+            <p className="flex items-center gap-1.5 truncate text-xs font-medium">
+              {playing && <Equalizer />}
+              <span className="truncate">
+                {doc.sentences[player.currentIdx]?.text.slice(0, 80) || doc.title}
+              </span>
             </p>
           </div>
+
+          <VolumeControl iconBtn={iconBtn} />
 
           <button
             onClick={() => setExpanded((v) => !v)}
@@ -198,27 +394,64 @@ export function PlayerBar({
             step={0.1}
             value={player.speed}
             onChange={(e) => player.setSpeed(Number(e.target.value))}
-            className="min-w-0 flex-1"
+            className="h-11 min-w-0 flex-1 cursor-pointer"
             aria-label="Playback speed"
           />
-          <select
-            value={player.voice}
-            onChange={(e) => player.setVoice(e.target.value)}
-            className="w-32 shrink-0 rounded-lg border border-zinc-300 px-1.5 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900 sm:w-40"
-            aria-label="Voice"
-            title="Narration voice"
-          >
-            {voices.length === 0 && <option>{player.voice}</option>}
-            {voices.map((v) => (
-              <option key={v.name} value={v.name}>
-                {v.name} · {v.description}
-              </option>
-            ))}
-          </select>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {currentTone && (
+              <span
+                className="hidden rounded-full bg-zinc-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 sm:inline"
+                title={`Voice tone: ${currentTone}`}
+              >
+                {currentTone}
+              </span>
+            )}
+            <select
+              value={player.voice}
+              onChange={(e) => player.setVoice(e.target.value)}
+              className="h-11 w-32 shrink-0 rounded-lg border border-zinc-300 px-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900 sm:w-40"
+              aria-label="Voice"
+              title={currentTone ? `Narration voice — ${currentTone}` : "Narration voice"}
+            >
+              {voices.length === 0 && <option>{player.voice}</option>}
+              {voices.map((v) => (
+                <option key={v.name} value={v.name}>
+                  {v.name} · {v.description}
+                </option>
+              ))}
+            </select>
+            <VoicePreviewButton voice={player.voice} />
+          </div>
         </div>
 
         {expanded && (
           <div className="mt-2 space-y-2 border-t border-zinc-200 pt-2 animate-fade-up dark:border-zinc-800">
+            <div
+              className="flex gap-1.5 overflow-x-auto pb-0.5"
+              role="group"
+              aria-label="Quick playback speeds"
+            >
+              {SPEED_STEPS.map((s) => {
+                const active = Math.abs(player.speed - s) < 0.05;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => {
+                      haptic();
+                      player.setSpeed(s);
+                    }}
+                    aria-pressed={active}
+                    className={`min-h-[44px] shrink-0 rounded-full px-3 text-xs font-semibold tabular-nums ${
+                      active
+                        ? "bg-emerald-600 text-white dark:bg-emerald-500 dark:text-zinc-950"
+                        : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+                    }`}
+                  >
+                    {s.toFixed(2).replace(/0$/, "")}x
+                  </button>
+                );
+              })}
+            </div>
             <input
               value={styleDraft}
               onChange={(e) => setStyleDraft(e.target.value)}
@@ -230,9 +463,40 @@ export function PlayerBar({
                 }
               }}
               placeholder="Style prompt (e.g. “warm bedtime-story voice”) — applies to new sentences"
-              className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+              className="min-h-[44px] w-full rounded-lg border border-zinc-300 px-3 py-2 text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
               aria-label="Narration style prompt"
             />
+            <div
+              className="flex gap-1.5 overflow-x-auto pb-0.5"
+              role="group"
+              aria-label="Style prompt presets"
+            >
+              {STYLE_PRESETS.map((p) => (
+                <button
+                  key={p.label}
+                  onClick={() => {
+                    haptic();
+                    setStyleDraft(p.prompt);
+                    player.setStylePrompt(p.prompt);
+                  }}
+                  className="min-h-[36px] shrink-0 rounded-full bg-zinc-200 px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                  title={p.prompt}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <button
+                onClick={() => {
+                  haptic();
+                  setStyleDraft("");
+                  player.setStylePrompt("");
+                }}
+                className="min-h-[36px] shrink-0 rounded-full border border-zinc-300 px-3 text-xs font-medium text-zinc-500 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                title="Clear the style prompt"
+              >
+                Clear
+              </button>
+            </div>
             <div className="flex items-center gap-2">
               <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
                 <Timer size={14} />
@@ -240,44 +504,46 @@ export function PlayerBar({
                   value=""
                   onChange={(e) => {
                     const v = e.target.value;
-                    player.setSleep(v === "" ? null : Number(v));
+                    if (v === "end") player.setSleep("end");
+                    else player.setSleep(v === "" ? null : Number(v));
                     e.target.value = "";
                   }}
-                  className="rounded-lg border border-zinc-300 px-1.5 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                  className="min-h-[44px] rounded-lg border border-zinc-300 px-1.5 py-1.5 text-xs dark:border-zinc-700 dark:bg-zinc-900"
                   aria-label="Sleep timer"
                 >
                   <option value="">
                     {player.sleepLeft !== null
-                      ? `Sleep ${formatSleep(player.sleepLeft)}`
-                      : "Sleep timer"}
+                      ? `⏳ ${formatSleep(player.sleepLeft)}`
+                      : player.sleepEndOfDoc
+                        ? "End of document"
+                        : "Sleep timer"}
                   </option>
                   <option value="5">5 min</option>
-                  <option value="10">10 min</option>
                   <option value="15">15 min</option>
                   <option value="30">30 min</option>
                   <option value="45">45 min</option>
                   <option value="60">60 min</option>
-                  <option value="90">90 min</option>
+                  <option value="end">End of document</option>
                 </select>
               </label>
-              {player.sleepLeft !== null && (
+              {(player.sleepLeft !== null || player.sleepEndOfDoc) && (
                 <button
                   onClick={() => player.setSleep(null)}
-                  className="rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                  className="flex min-h-[44px] items-center rounded-lg px-2 py-1.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
                 >
                   Cancel
                 </button>
               )}
               <a
                 href={`/api/documents/${doc.id}/audio?download=1&voice=${encodeURIComponent(player.voice)}&style=${encodeURIComponent(player.stylePrompt)}`}
-                className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                className="flex min-h-[44px] items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
                 title="Download the whole document as one WAV file"
               >
                 <Download size={13} /> Audio
               </a>
               <button
                 onClick={onOpenAI}
-                className="ml-auto flex items-center gap-1 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+                className="ml-auto flex min-h-[44px] items-center gap-1 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
               >
                 <Sparkles size={13} /> AI Assistant
               </button>

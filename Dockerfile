@@ -1,4 +1,4 @@
-# VocalFlow — multi-stage production image (Next.js standalone + native sqlite)
+# VoxShelf — multi-stage production image (Next.js standalone + native sqlite)
 FROM node:24-slim AS base
 
 # ---- dependencies (may compile better-sqlite3 from source) ----
@@ -32,10 +32,17 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/package.json ./package.json
 
 RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
 USER nextjs
 
+LABEL org.opencontainers.image.title="VoxShelf" \
+  org.opencontainers.image.description="Self-hostable text-to-speech app powered by Gemini speech generation" \
+  org.opencontainers.image.licenses="MIT"
+
 EXPOSE 38492
 VOLUME /app/data
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||38492)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "server.js"]

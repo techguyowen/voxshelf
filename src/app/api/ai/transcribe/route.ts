@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { transcribeAudio } from "@/lib/gemini";
 import { apiError, toApiError } from "@/lib/http";
 
@@ -10,6 +11,8 @@ const MAX_BYTES = 15 * 1024 * 1024;
 
 /** POST /api/ai/transcribe — FormData { file } → { text }. */
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     let form: FormData;
     try {

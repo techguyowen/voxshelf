@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
+import { requireAuth } from "@/lib/auth";
 import { toApiError } from "@/lib/http";
 import { resolveApiKey } from "@/lib/settings";
 import type { ModelInfo, ModelsResponse } from "@/lib/types";
@@ -215,6 +216,8 @@ function mergeWithPresets(
  * key is available or the live call fails, so the UI stays populated.
  */
 export async function GET(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const explicitKey = req.nextUrl.searchParams.get("key");
     const apiKey = resolveApiKey(explicitKey);

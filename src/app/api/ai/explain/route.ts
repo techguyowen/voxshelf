@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { explainSelection } from "@/lib/gemini";
 import { apiError, toApiError } from "@/lib/http";
 
@@ -8,6 +9,8 @@ export const maxDuration = 120;
 
 /** POST /api/ai/explain — { selection, context?, key? } */
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const body = (await req.json()) as {
       selection?: string;

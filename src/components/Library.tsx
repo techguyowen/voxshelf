@@ -2,6 +2,7 @@
 
 import {
   Archive,
+  BarChart3,
   BookOpen,
   Download,
   FileText,
@@ -12,6 +13,7 @@ import {
   Link2,
   List,
   Loader2,
+  Pencil,
   Plus,
   ScanLine,
   Search,
@@ -28,10 +30,12 @@ import {
   removeDocumentFromDevice,
   saveDocumentToDevice,
 } from "@/lib/offlineStore";
+import { estimateSecondsLeft, formatDuration } from "@/lib/readingTime";
 import type { DocumentSummary, Folder, SourceType } from "@/lib/types";
 import { useUI } from "./AppShell";
 import { Modal } from "./Modal";
 import { PrerenderModal } from "./PrerenderModal";
+import { useToast } from "./Toast";
 
 const FOLDER_COLORS = [
   "#64748b",
@@ -77,6 +81,18 @@ function progressPct(doc: DocumentSummary): number {
   );
 }
 
+function readingTimeBadge(doc: DocumentSummary): string {
+  const speed = Number.isFinite(doc.speed) && doc.speed > 0 ? doc.speed : 1;
+  if (progressPct(doc) >= 100 || doc.wordCount <= 0) return "📖 Done";
+  const frac =
+    doc.sentenceCount > 1
+      ? Math.min(1, Math.max(0, doc.progressSentenceIndex / (doc.sentenceCount - 1)))
+      : 0;
+  const wordsLeft = Math.round(doc.wordCount * (1 - frac));
+  if (wordsLeft <= 0) return "📖 Done";
+  return `📖 ${formatDuration(estimateSecondsLeft(wordsLeft, speed))} left @ ${speed.toFixed(1)}x`;
+}
+
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -90,7 +106,8 @@ function timeAgo(iso: string): string {
 }
 
 export function Library() {
-  const { openImport } = useUI();
+  const { openImport, openStats } = useUI();
+  const toast = useToast();
   const router = useRouter();
   const [docs, setDocs] = useState<DocumentSummary[]>([]);
   const [tags, setTags] = useState<string[]>([]);
@@ -110,6 +127,11 @@ export function Library() {
   const [newFolderColor, setNewFolderColor] = useState(FOLDER_COLORS[5]);
   const [folderBusy, setFolderBusy] = useState(false);
   const [prerenderDoc, setPrerenderDoc] = useState<DocumentSummary | null>(null);
+  const [editDoc, setEditDoc] = useState<DocumentSummary | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editAuthor, setEditAuthor] = useState("");
+  const [editTags, setEditTags] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
   const [deviceMap, setDeviceMap] = useState<
     Record<string, { bytes: number; downloadedAt: string }>
   >({});
@@ -118,6 +140,9 @@ export function Library() {
     Record<string, { done: number; total: number; bytes: number }>
   >({});
   const [offlineLib, setOfflineLib] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 300);
@@ -202,6 +227,16 @@ export function Library() {
   }, [refresh]);
 
   useEffect(() => {
+    // Sync downloads/removals land while Settings is open above us.
+    const onChanged = () => {
+      void refresh();
+      void refreshFolders();
+    };
+    window.addEventListener("voxshelf:library-changed", onChanged);
+    return () => window.removeEventListener("voxshelf:library-changed", onChanged);
+  }, [refresh, refreshFolders]);
+
+  useEffect(() => {
     void refreshFolders();
   }, [refreshFolders]);
 
@@ -213,6 +248,31 @@ export function Library() {
     () => (onDeviceOnly ? docs.filter((d) => deviceMap[d.id]) : docs),
     [docs, onDeviceOnly, deviceMap],
   );
+
+  const activeQuery = debouncedQ || q.trim();
+  const hasActiveFilters =
+    activeQuery !== "" || tag !== "" || folder !== "";
+  const folderName =
+    folder === "unfiled"
+      ? "Unfiled"
+      : folders.find((f) => f.id === folder)?.name;
+
+  function clearFilters() {
+    setQ("");
+    setDebouncedQ("");
+    setTag("");
+    setFolder("");
+    setOnDeviceOnly(false);
+  }
+
+  function zeroResultsMessage(): string {
+    if (activeQuery) return `No documents found matching '${activeQuery}'`;
+    if (tag && folderName)
+      return `No documents found tagged "${tag}" in ${folderName}`;
+    if (tag) return `No documents found tagged "${tag}"`;
+    if (folderName) return `No documents found in ${folderName}`;
+    return "No documents found for these filters";
+  }
 
   const onDeviceCount = useMemo(
     () => Object.keys(deviceMap).length,
@@ -228,8 +288,9 @@ export function Library() {
         setDeviceProg((p) => ({ ...p, [doc.id]: { done, total, bytes } }));
       });
       await refreshDeviceMap();
+      toast.success(`"${doc.title}" saved to this device.`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Download to device failed.");
+      toast.error(e instanceof Error ? e.message : "Download to device failed.");
     } finally {
       setDeviceProg((p) => {
         const next = { ...p };
@@ -243,8 +304,9 @@ export function Library() {
     try {
       await removeDocumentFromDevice(id);
       await refreshDeviceMap();
+      toast.info("Removed from this device.");
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not remove download.");
+      toast.error(e instanceof Error ? e.message : "Could not remove download.");
     }
   }
 
@@ -257,7 +319,7 @@ export function Library() {
       await api.deleteDocument(id);
       setDocs((d) => d.filter((x) => x.id !== id));
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Delete failed.");
+      toast.error(e instanceof Error ? e.message : "Delete failed.");
     } finally {
       setBusyId(null);
     }
@@ -275,7 +337,7 @@ export function Library() {
         setDocs((d) => d.map((x) => (x.id === doc.id ? updated : x)));
       }
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Update failed.");
+      toast.error(e instanceof Error ? e.message : "Update failed.");
     } finally {
       setBusyId(null);
     }
@@ -289,8 +351,9 @@ export function Library() {
       setFolders((list) => [...list, f].sort((a, b) => a.name.localeCompare(b.name)));
       setNewFolderName("");
       setFolderModal(false);
+      toast.success(`Folder "${f.name}" created.`);
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not create folder.");
+      toast.error(e instanceof Error ? e.message : "Could not create folder.");
     } finally {
       setFolderBusy(false);
     }
@@ -305,7 +368,7 @@ export function Library() {
       else void refreshFolders();
       void refresh();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not delete folder.");
+      toast.error(e instanceof Error ? e.message : "Could not delete folder.");
     }
   }
 
@@ -323,9 +386,129 @@ export function Library() {
       );
       void refreshFolders();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Could not move document.");
+      toast.error(e instanceof Error ? e.message : "Could not move document.");
     } finally {
       setBusyId(null);
+    }
+  }
+
+  function openEdit(doc: DocumentSummary) {
+    setEditDoc(doc);
+    setEditTitle(doc.title);
+    setEditAuthor(doc.author ?? "");
+    setEditTags(doc.tags.join(", "));
+  }
+
+  async function saveEdit() {
+    if (!editDoc || !editTitle.trim()) return;
+    setEditBusy(true);
+    try {
+      const updated = await api.updateDocument(editDoc.id, {
+        title: editTitle.trim(),
+        author: editAuthor.trim() || null,
+        tags: editTags.split(",").map((t) => t.trim()).filter(Boolean),
+      });
+      setDocs((d) => d.map((x) => (x.id === editDoc.id ? updated : x)));
+      setEditDoc(null);
+      toast.success("Document details updated.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Update failed.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function cancelSelection() {
+    setSelected(new Set());
+    setSelectMode(false);
+  }
+
+  // Drop selected ids that are no longer in the list (deleted/moved away).
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const ids = new Set(docs.map((d) => d.id));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (ids.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [docs]);
+
+  async function moveSelected(folderId: string | null) {
+    if (selected.size === 0 || batchBusy) return;
+    setBatchBusy(true);
+    try {
+      const ids = [...selected];
+      await Promise.all(ids.map((id) => api.updateDocument(id, { folderId })));
+      setSelected(new Set());
+      await refresh();
+      await refreshFolders();
+      toast.success(`Moved ${ids.length} document${ids.length === 1 ? "" : "s"}.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not move documents.");
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  async function exportSelected() {
+    if (selected.size === 0 || batchBusy) return;
+    setBatchBusy(true);
+    try {
+      const ids = [...selected];
+      const details = await Promise.all(ids.map((id) => api.getDocument(id)));
+      downloadTextFile(
+        `voxshelf-export-${ids.length}-doc${ids.length === 1 ? "" : "s"}.json`,
+        JSON.stringify(details, null, 2),
+        "application/json",
+      );
+      toast.success(`Exported ${ids.length} document${ids.length === 1 ? "" : "s"} as JSON.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed.");
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  async function deleteSelected() {
+    if (selected.size === 0 || batchBusy) return;
+    const n = selected.size;
+    if (
+      !confirm(
+        `Delete ${n} document${n === 1 ? "" : "s"}? This removes documents, progress and bookmarks. Cached audio is kept.`,
+      )
+    ) {
+      return;
+    }
+    setBatchBusy(true);
+    try {
+      const ids = [...selected];
+      const results = await Promise.allSettled(
+        ids.map((id) => api.deleteDocument(id)),
+      );
+      const removed = new Set(
+        ids.filter((_, i) => results[i].status === "fulfilled"),
+      );
+      const failed = ids.length - removed.size;
+      setDocs((d) => d.filter((x) => !removed.has(x.id)));
+      setSelected(new Set());
+      if (failed > 0) toast.error(`${failed} of ${n} deletes failed.`);
+      else toast.success(`Deleted ${n} document${n === 1 ? "" : "s"}.`);
+    } finally {
+      setBatchBusy(false);
     }
   }
 
@@ -344,14 +527,14 @@ export function Library() {
         format === "md" ? "text/markdown" : "text/plain",
       );
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Export failed.");
+      toast.error(e instanceof Error ? e.message : "Export failed.");
     } finally {
       setBusyId(null);
     }
   }
 
   return (
-    <div className="pt-5">
+    <div className={selected.size > 0 ? "pb-28 pt-5" : "pt-5"}>
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Library</h1>
         <span className="rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
@@ -359,8 +542,31 @@ export function Library() {
         </span>
         <div className="ml-auto flex items-center gap-1">
           <button
+            onClick={() => {
+              if (selectMode) cancelSelection();
+              else setSelectMode(true);
+            }}
+            aria-pressed={selectMode}
+            className={`flex min-h-[44px] items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium ${
+              selectMode
+                ? "border-emerald-500 text-emerald-700 dark:text-emerald-400"
+                : "border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            }`}
+            title="Select multiple documents for batch actions"
+          >
+            {selectMode ? "Done" : "Select"}
+          </button>
+          <button
+            onClick={openStats}
+            className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            title="Reading stats, streaks and history"
+          >
+            <BarChart3 size={15} />
+            <span className="hidden sm:inline">Reading Stats</span>
+          </button>
+          <button
             onClick={() => setView("grid")}
-            className={`rounded-lg p-2 ${view === "grid" ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
+            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 ${view === "grid" ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
             aria-label="Grid view"
             title="Grid view"
           >
@@ -368,7 +574,7 @@ export function Library() {
           </button>
           <button
             onClick={() => setView("list")}
-            className={`rounded-lg p-2 ${view === "list" ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
+            className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 ${view === "list" ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
             aria-label="List view"
             title="List view"
           >
@@ -382,7 +588,7 @@ export function Library() {
           onClick={() => setFolder("")}
           role="tab"
           aria-selected={folder === ""}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+          className={`flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
             folder === ""
               ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
               : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
@@ -394,7 +600,7 @@ export function Library() {
           onClick={() => setFolder(folder === "unfiled" ? "" : "unfiled")}
           role="tab"
           aria-selected={folder === "unfiled"}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+          className={`flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
             folder === "unfiled"
               ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
               : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
@@ -406,7 +612,7 @@ export function Library() {
           onClick={() => setOnDeviceOnly((v) => !v)}
           role="tab"
           aria-selected={onDeviceOnly}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+          className={`flex min-h-[44px] shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
             onDeviceOnly
               ? "bg-emerald-600 text-white dark:bg-emerald-500 dark:text-zinc-950"
               : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
@@ -421,7 +627,7 @@ export function Library() {
         {folders.map((f) => (
           <span
             key={f.id}
-            className={`flex shrink-0 items-center gap-1 rounded-full py-0.5 pl-3 pr-1 text-xs font-medium ${
+            className={`flex min-h-[44px] shrink-0 items-center gap-1 rounded-full py-0.5 pl-3 pr-1 text-xs font-medium ${
               folder === f.id
                 ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
                 : "bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
@@ -451,7 +657,7 @@ export function Library() {
         ))}
         <button
           onClick={() => setFolderModal(true)}
-          className="flex shrink-0 items-center gap-1 rounded-full border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-emerald-400"
+          className="flex min-h-[44px] shrink-0 items-center gap-1 rounded-full border border-dashed border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:border-emerald-500 hover:text-emerald-700 dark:border-zinc-700 dark:text-zinc-400 dark:hover:text-emerald-400"
         >
           <FolderPlus size={13} /> New Folder
         </button>
@@ -467,24 +673,38 @@ export function Library() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search title, author, tags…"
-            className="w-full rounded-lg border border-zinc-300 py-2 pl-9 pr-3 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+            className="min-h-[44px] w-full rounded-lg border border-zinc-300 py-2 pl-9 pr-9 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
           />
+          {q && (
+            <button
+              onClick={() => {
+                setQ("");
+                setDebouncedQ("");
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
         <div className="flex gap-2">
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value)}
-            className="rounded-lg border border-zinc-300 px-2 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="min-h-[44px] rounded-lg border border-zinc-300 px-2 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             aria-label="Sort"
           >
-            <option value="updated">Recently updated</option>
-            <option value="created">Recently added</option>
-            <option value="title">Title A–Z</option>
-            <option value="progress">Recently played</option>
+            <option value="updated">Recently Read / Updated</option>
+            <option value="created">Date Added (Newest first)</option>
+            <option value="title">Title (A → Z)</option>
+            <option value="length-desc">Length (Longest first)</option>
+            <option value="length-asc">Length (Shortest first)</option>
           </select>
           <button
             onClick={() => setShowArchived((v) => !v)}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium ${
+            className={`flex min-h-[44px] items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium ${
               showArchived
                 ? "border-emerald-500 text-emerald-700 dark:text-emerald-400"
                 : "border-zinc-300 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
@@ -544,7 +764,24 @@ export function Library() {
           </button>
         </div>
       ) : filtered.length === 0 ? (
-        onDeviceOnly ? (
+        hasActiveFilters ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 px-4 py-14 text-center dark:border-zinc-700">
+            <Search size={32} className="text-zinc-400" />
+            <div>
+              <p className="font-semibold">{zeroResultsMessage()}</p>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Try a different search, or clear every filter to see the full
+                library again.
+              </p>
+            </div>
+            <button
+              onClick={clearFilters}
+              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+            >
+              Clear Filters
+            </button>
+          </div>
+        ) : onDeviceOnly ? (
           <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 px-4 py-14 text-center dark:border-zinc-700">
             <div className="text-3xl">📱</div>
             <div>
@@ -562,21 +799,21 @@ export function Library() {
             </button>
           </div>
         ) : (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 px-4 py-14 text-center dark:border-zinc-700">
-          <BookOpen size={32} className="text-zinc-400" />
-          <div>
-            <p className="font-semibold">Your library is empty</p>
-            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-              Import a PDF, article, scan or paste text to start listening.
-            </p>
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-zinc-300 px-4 py-14 text-center dark:border-zinc-700">
+            <BookOpen size={32} className="text-zinc-400" />
+            <div>
+              <p className="font-semibold">Your library is empty</p>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                Import a PDF, article, scan or paste text to start listening.
+              </p>
+            </div>
+            <button
+              onClick={openImport}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+            >
+              <Plus size={16} /> Import something
+            </button>
           </div>
-          <button
-            onClick={openImport}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
-          >
-            <Plus size={16} /> Import something
-          </button>
-        </div>
         )
       ) : (
         <div
@@ -593,11 +830,22 @@ export function Library() {
               <article
                 key={doc.id}
                 className={`group rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900 ${
+                  selected.has(doc.id) ? "border-emerald-500 ring-1 ring-emerald-500" : ""
+                }${
                   view === "list" ? "sm:flex sm:items-center sm:gap-4" : ""
                 }`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        checked={selected.has(doc.id)}
+                        onChange={() => toggleSelect(doc.id)}
+                        className="h-5 w-5 shrink-0 cursor-pointer accent-emerald-600"
+                        aria-label={`Select "${doc.title}"`}
+                      />
+                    )}
                     <span className="flex shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
                       {badge.icon}
                       {badge.label}
@@ -646,6 +894,12 @@ export function Library() {
                     {doc.author || doc.voice} · {doc.wordCount.toLocaleString()} words ·{" "}
                     {doc.sentenceCount.toLocaleString()} sentences
                   </p>
+                  <span
+                    className="mt-1.5 inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                    title={`Estimated listening time remaining at ${doc.speed.toFixed(1)}x speed`}
+                  >
+                    {readingTimeBadge(doc)}
+                  </span>
                   {doc.tags.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {doc.tags.slice(0, 4).map((t) => (
@@ -673,8 +927,17 @@ export function Library() {
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <span className="shrink-0 text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
-                      {pct}%
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ${
+                        pct >= 100
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
+                          : pct > 0
+                            ? "bg-sky-100 text-sky-800 dark:bg-sky-950/70 dark:text-sky-300"
+                            : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                      }`}
+                      title={`Sentence ${doc.progressSentenceIndex + 1} of ${doc.sentenceCount}`}
+                    >
+                      {pct >= 100 ? "✓ Finished" : pct > 0 ? `${pct}% read` : "○ New"}
                     </span>
                   </div>
                   <div className="mt-1.5">
@@ -720,7 +983,7 @@ export function Library() {
                 >
                   <button
                     onClick={() => router.push(`/reader/${doc.id}`)}
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+                    className="flex min-h-[44px] items-center rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
                   >
                     {pct > 0 && pct < 100 ? "Resume" : pct >= 100 ? "Replay" : "Read"}
                   </button>
@@ -728,7 +991,7 @@ export function Library() {
                     value={doc.folderId || ""}
                     onChange={(e) => void moveDoc(doc, e.target.value || null)}
                     disabled={busyId === doc.id}
-                    className="max-w-28 rounded-lg border border-zinc-200 px-1 py-1.5 text-xs text-zinc-500 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+                    className="max-w-28 min-h-[44px] rounded-lg border border-zinc-200 px-1 py-1.5 text-xs text-zinc-500 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
                     title="Move to folder"
                     aria-label={`Move "${doc.title}" to folder`}
                   >
@@ -740,9 +1003,18 @@ export function Library() {
                     ))}
                   </select>
                   <button
+                    onClick={() => openEdit(doc)}
+                    disabled={busyId === doc.id}
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    title="✏️ Edit Details"
+                    aria-label={`Edit details for "${doc.title}"`}
+                  >
+                    <Pencil size={16} />
+                  </button>
+                  <button
                     onClick={() => setPrerenderDoc(doc)}
                     disabled={busyId === doc.id}
-                    className="rounded-lg p-1.5 text-zinc-500 hover:bg-amber-100 hover:text-amber-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-amber-950 dark:hover:text-amber-300"
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-1.5 text-zinc-500 hover:bg-amber-100 hover:text-amber-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-amber-950 dark:hover:text-amber-300"
                     title="Pre-render full audio"
                     aria-label={`Pre-render full audio for "${doc.title}"`}
                   >
@@ -751,7 +1023,7 @@ export function Library() {
                   <button
                     onClick={() => void exportDoc(doc, "txt")}
                     disabled={busyId === doc.id}
-                    className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
                     title="Export as .txt"
                   >
                     <Download size={16} />
@@ -759,7 +1031,7 @@ export function Library() {
                   <button
                     onClick={() => void toggleArchive(doc)}
                     disabled={busyId === doc.id}
-                    className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
                     title={doc.isArchived ? "Unarchive" : "Archive"}
                   >
                     <Archive size={16} />
@@ -767,7 +1039,7 @@ export function Library() {
                   <button
                     onClick={() => void removeDoc(doc.id, doc.title)}
                     disabled={busyId === doc.id}
-                    className="rounded-lg p-1.5 text-zinc-500 hover:bg-red-100 hover:text-red-600 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-red-950 dark:hover:text-red-400"
+                    className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-1.5 text-zinc-500 hover:bg-red-100 hover:text-red-600 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-red-950 dark:hover:text-red-400"
                     title="Delete"
                   >
                     {busyId === doc.id ? (
@@ -843,6 +1115,64 @@ export function Library() {
         </Modal>
       )}
 
+      {editDoc && (
+        <Modal title="✏️ Edit Details" onClose={() => setEditDoc(null)}>
+          <div className="space-y-4">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                Title
+              </span>
+              <input
+                autoFocus
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                maxLength={300}
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                Author
+              </span>
+              <input
+                value={editAuthor}
+                onChange={(e) => setEditAuthor(e.target.value)}
+                placeholder="Unknown author"
+                maxLength={300}
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                Tags (comma-separated)
+              </span>
+              <input
+                value={editTags}
+                onChange={(e) => setEditTags(e.target.value)}
+                placeholder="e.g. fiction, favorites"
+                className="w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setEditDoc(null)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void saveEdit()}
+                disabled={editBusy || !editTitle.trim()}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+              >
+                {editBusy && <Loader2 size={14} className="animate-spin" />}
+                Save changes
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {prerenderDoc && (
         <PrerenderModal
           docId={prerenderDoc.id}
@@ -853,6 +1183,71 @@ export function Library() {
             void refresh();
           }}
         />
+      )}
+
+      {selected.size > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+          <div
+            className="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur animate-fade-up dark:border-zinc-700 dark:bg-zinc-900/95"
+            role="toolbar"
+            aria-label="Batch actions for selected documents"
+          >
+            <span className="rounded-full bg-zinc-900 px-2.5 py-1 text-xs font-semibold tabular-nums text-white dark:bg-zinc-100 dark:text-zinc-900">
+              {selected.size} selected
+            </span>
+            <label className="flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800">
+              <FolderIcon size={14} />
+              <select
+                value=""
+                disabled={batchBusy}
+                onChange={(e) => {
+                  void moveSelected(e.target.value || null);
+                  e.target.value = "";
+                }}
+                className="cursor-pointer bg-transparent outline-none disabled:cursor-not-allowed dark:bg-zinc-900"
+                aria-label="Move selected to folder"
+              >
+                <option value="" disabled>
+                  Move to Folder
+                </option>
+                <option value="">Unfiled</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              onClick={() => void exportSelected()}
+              disabled={batchBusy}
+              className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              {batchBusy ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Download size={14} />
+              )}
+              Export Selected (.json)
+            </button>
+            <button
+              onClick={() => void deleteSelected()}
+              disabled={batchBusy}
+              className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/50"
+            >
+              <Trash2 size={14} />
+              Delete Selected
+            </button>
+            <button
+              onClick={cancelSelection}
+              className="flex min-h-[44px] items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              aria-label="Cancel selection"
+            >
+              <X size={14} />
+              Cancel
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { deleteFolder } from "@/lib/documents";
 import { apiError, toApiError } from "@/lib/http";
 
@@ -8,7 +9,9 @@ export const dynamic = "force-dynamic";
 type Params = { params: Promise<{ id: string }> };
 
 /** DELETE /api/folders/[id] — documents inside become unfiled. */
-export async function DELETE(_req: NextRequest, { params }: Params) {
+export async function DELETE(req: NextRequest, { params }: Params) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const { id } = await params;
     if (!deleteFolder(id)) return apiError("Folder not found.", 404);

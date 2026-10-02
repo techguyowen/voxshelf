@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { getCachedAudio } from "@/lib/audioCache";
 import { audioFilePath, concatWavs } from "@/lib/audio";
 import { getDocumentDetail, updateSentenceAudio } from "@/lib/documents";
@@ -16,6 +17,8 @@ export const maxDuration = 300;
  * Missing sentences are synthesized on demand. ?download=1 forces attachment.
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const { id } = await params;
     const doc = getDocumentDetail(id);
@@ -36,7 +39,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       parts.push(readFileSync(filePath));
     }
     const wav = concatWavs(parts);
-    const safeName = `${doc.title.replace(/[^\w\d-_]+/g, "_").slice(0, 80) || "vocalflow"}.wav`;
+    const safeName = `${doc.title.replace(/[^\w\d-_]+/g, "_").slice(0, 80) || "voxshelf"}.wav`;
     const download = sp.get("download") === "1";
     return new NextResponse(wav as unknown as BodyInit, {
       status: 200,

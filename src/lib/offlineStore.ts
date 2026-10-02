@@ -1,9 +1,9 @@
-// On-device offline storage engine for the VocalFlow PWA.
+// On-device offline storage engine for the VoxShelf PWA.
 //
-// - IndexedDB database `vocalflow_offline_v1`, store `documents`: full
+// - IndexedDB database `voxshelf_offline_v1`, store `documents`: full
 //   DocumentDetail per book (sentences with audio hashes, bookmarks,
 //   highlights) plus totalBytes + downloadedAt.
-// - CacheStorage `vocalflow-offline-audio-v1`: raw audio Responses for
+// - CacheStorage `voxshelf-offline-audio-v1`: raw audio Responses for
 //   `/api/audio/[hash]`, served cache-first by public/sw.js so playback
 //   works with zero network once a book is on the device.
 //
@@ -12,9 +12,9 @@
 import { api } from "./client";
 import type { DocumentDetail } from "./types";
 
-export const OFFLINE_DB_NAME = "vocalflow_offline_v1";
+export const OFFLINE_DB_NAME = "voxshelf_offline_v1";
 export const OFFLINE_DOC_STORE = "documents";
-export const OFFLINE_AUDIO_CACHE = "vocalflow-offline-audio-v1";
+export const OFFLINE_AUDIO_CACHE = "voxshelf-offline-audio-v1";
 
 export type OfflineProgress = (
   done: number,

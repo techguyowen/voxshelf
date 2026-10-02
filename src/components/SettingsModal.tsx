@@ -1,14 +1,17 @@
 "use client";
 
 import {
+  BookOpenText,
   Check,
   ChevronDown,
   Eye,
   EyeOff,
+  FolderOpen,
   KeyRound,
   Loader2,
   RefreshCw,
   Search,
+  Server,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -20,9 +23,14 @@ import type {
   ModelInfo,
   ModelsResponse,
   PublicSettings,
+  SyncStatusDto,
 } from "@/lib/types";
 import { VOICE_NAMES } from "@/lib/voices";
 import { Modal } from "./Modal";
+import { PronunciationModal } from "./PronunciationModal";
+import { ServerBrowserModal } from "./ServerBrowserModal";
+import { useToast } from "./Toast";
+import { VoicePreviewButton } from "./VoicePreviewButton";
 
 const inputCls =
   "w-full rounded-lg border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900";
@@ -253,6 +261,275 @@ function ModelSelector({
   );
 }
 
+function formatSyncTime(iso: string | null): string {
+  if (!iso) return "never";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "never" : d.toLocaleString();
+}
+
+function SyncSection() {
+  const [status, setStatus] = useState<SyncStatusDto | null>(null);
+  const [url, setUrl] = useState("");
+  const [enabled, setEnabled] = useState(true);
+  const [syncKey, setSyncKey] = useState("");
+  const [keyTouched, setKeyTouched] = useState(false);
+  const [mode, setMode] = useState<"full" | "selective">("full");
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function refresh() {
+    try {
+      const s = await api.syncStatus();
+      setStatus(s);
+      setUrl(s.serverUrl);
+      setEnabled(s.enabled);
+      setMode(s.mode);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load sync status.");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  function pollAfterSave() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    let n = 0;
+    pollRef.current = setInterval(() => {
+      n += 1;
+      void refresh();
+      if (n >= 5 && pollRef.current) clearInterval(pollRef.current);
+    }, 3000);
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      const patch: {
+        serverUrl: string;
+        enabled: boolean;
+        apiKey?: string;
+        mode: "full" | "selective";
+      } = { serverUrl: url, enabled, mode };
+      if (keyTouched) patch.apiKey = syncKey;
+      const s = await api.syncConfig(patch);
+      setStatus(s);
+      setKeyTouched(false);
+      setSyncKey("");
+      toast.success(s.serverUrl ? "Sync server saved — syncing…" : "Sync disabled (standalone mode).");
+      if (s.serverUrl && s.enabled) pollAfterSave();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Failed to save sync settings.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncNow() {
+    setSyncing(true);
+    setError(null);
+    try {
+      const r = await api.syncNow();
+      await refresh();
+      window.dispatchEvent(new Event("voxshelf:library-changed"));
+      if (r.ok) {
+        toast.success(`Synced: ${r.pushed} sent, ${r.pulled} received.`);
+      } else {
+        toast.error(r.error || "Sync failed.");
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Sync failed.";
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  const last = status?.lastResult ?? null;
+  const skewMins = last?.skewMs === undefined ? null : Math.round(last.skewMs / 60000);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Server
+            size={16}
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400"
+          />
+          <input
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="http://192.168.1.10:38492"
+            className={`${inputCls} pl-9`}
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Sync server URL"
+          />
+        </div>
+        <button
+          onClick={syncNow}
+          disabled={syncing || !status?.serverUrl}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+        >
+          {syncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+          Sync now
+        </button>
+      </div>
+      <label className="flex items-center gap-2 text-sm text-zinc-700 dark:text-zinc-300">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => setEnabled(e.target.checked)}
+          className="h-4 w-4 accent-emerald-600"
+        />
+        Sync automatically in the background
+      </label>
+      <div>
+        <input
+          type="password"
+          value={keyTouched ? syncKey : status?.syncKeySet ? "••••••••" : ""}
+          onChange={(e) => {
+            setSyncKey(e.target.value);
+            setKeyTouched(true);
+          }}
+          placeholder="Server API key (only if that server is locked)"
+          className={inputCls}
+          autoComplete="off"
+          spellCheck={false}
+          aria-label="Sync server API key"
+        />
+      </div>
+      <fieldset>
+        <legend className="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          What this device pulls from the server
+        </legend>
+        <div className="space-y-1.5">
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50">
+            <input
+              type="radio"
+              name="sync-mode"
+              checked={mode === "full"}
+              onChange={() => setMode("full")}
+              className="mt-0.5 h-4 w-4 accent-emerald-600"
+            />
+            <span>
+              <span className="font-medium">Full library</span>
+              <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                Everything on the server syncs here automatically.
+              </span>
+            </span>
+          </label>
+          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-800/50">
+            <input
+              type="radio"
+              name="sync-mode"
+              checked={mode === "selective"}
+              onChange={() => setMode("selective")}
+              className="mt-0.5 h-4 w-4 accent-emerald-600"
+            />
+            <span>
+              <span className="font-medium">Selected only</span>
+              <span className="block text-xs text-zinc-500 dark:text-zinc-400">
+                Only downloaded documents and folders stay in sync.
+                {status && status.selection.docs.length + status.selection.folders.length > 0
+                  ? ` (${status.selection.docs.length} docs · ${status.selection.folders.length} folders picked)`
+                  : ""}
+              </span>
+            </span>
+          </label>
+        </div>
+      </fieldset>
+      {status?.serverUrl && (
+        <div>
+          <button
+            onClick={() => setBrowserOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          >
+            <FolderOpen size={15} />
+            Browse server library…
+          </button>
+        </div>
+      )}
+      <div>
+        <button
+          onClick={save}
+          disabled={busy}
+          className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+        >
+          {busy && <Loader2 size={15} className="animate-spin" />}
+          Save sync settings
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      <div className="rounded-lg border border-zinc-200 px-3 py-2.5 text-xs text-zinc-600 dark:border-zinc-800 dark:text-zinc-300">
+        {!status ? (
+          <span className="flex items-center gap-1.5">
+            <Loader2 size={13} className="animate-spin" /> Loading sync status…
+          </span>
+        ) : !status.serverUrl ? (
+          <span>
+            Standalone mode — your library lives only on this device. Enter a
+            server URL above to sync with your Docker server or another device.
+          </span>
+        ) : (
+          <span className="space-y-1">
+            <span className="block">
+              {status.enabled ? "Syncing with " : "Paused — last synced with "}
+              <span className="font-mono">{status.serverUrl}</span>
+              {" · "}last sync {formatSyncTime(status.lastSyncAt)}
+            </span>
+            {last && (
+              <span className="block">
+                {last.ok
+                  ? `${last.pushed} sent · ${last.pulled} received${last.conflicts > 0 ? ` · ${last.conflicts} conflict${last.conflicts === 1 ? "" : "s"} (newest won)` : ""}`
+                  : `Last sync failed: ${last.error || "unknown error"}${
+                      /401|Unauthorized/i.test(last.error || "")
+                        ? " — that server is locked; enter its API key above."
+                        : ""
+                    }`}
+                {status.pendingLocal > 0 && ` · ${status.pendingLocal} local change${status.pendingLocal === 1 ? "" : "s"} waiting`}
+              </span>
+            )}
+            {skewMins !== null && Math.abs(skewMins) >= 5 && (
+              <span className="block font-medium text-amber-600 dark:text-amber-400">
+                Device clocks differ by ~{Math.abs(skewMins)} min — sync order
+                follows timestamps, so enable automatic time on both devices.
+              </span>
+            )}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        {status?.mode === "selective"
+          ? "Selective mode: this device pulls only its picked documents and folders (settings always sync). Anything you create here still uploads to the server."
+          : "Syncs documents, progress, bookmarks, highlights, folders, podcast scripts, settings, and reading stats. Audio cache and your API key stay on this device."}
+      </p>
+      {browserOpen && (
+        <ServerBrowserModal
+          onClose={() => setBrowserOpen(false)}
+          onChanged={() => {
+            void refresh();
+            window.dispatchEvent(new Event("voxshelf:library-changed"));
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 export function SettingsModal({
   onClose,
   onSaved,
@@ -269,6 +546,10 @@ export function SettingsModal({
   const [showKey, setShowKey] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [keyTouched, setKeyTouched] = useState(false);
+  const [testingKey, setTestingKey] = useState(false);
+  const [keyStatus, setKeyStatus] = useState<
+    { ok: boolean; message: string } | null
+  >(null);
   const [voice, setVoice] = useState("Kore");
   const [speed, setSpeed] = useState(1);
   const [ttsModel, setTtsModel] = useState("");
@@ -278,7 +559,9 @@ export function SettingsModal({
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [clearing, setClearing] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [pronOpen, setPronOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
 
   useEffect(() => {
     let live = true;
@@ -328,6 +611,34 @@ export function SettingsModal({
     }
   }
 
+  async function testKey() {
+    setTestingKey(true);
+    setKeyStatus(null);
+    try {
+      const res = await api.models(
+        keyTouched && apiKey.trim() ? apiKey : undefined,
+      );
+      if (res.live) {
+        const count = res.ttsModels.length + res.textModels.length;
+        const message = `Valid Key ✓ (${count} models active)`;
+        setKeyStatus({ ok: true, message });
+        setModelLists(res);
+        setModelsError(null);
+        toast.success(message);
+      } else {
+        const message = res.error || "Key check failed: no live models returned.";
+        setKeyStatus({ ok: false, message });
+        toast.error(message);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Key check failed.";
+      setKeyStatus({ ok: false, message });
+      toast.error(message);
+    } finally {
+      setTestingKey(false);
+    }
+  }
+
   async function save() {
     setSaving(true);
     setError(null);
@@ -371,7 +682,7 @@ export function SettingsModal({
     try {
       const data = JSON.parse(await file.text()) as unknown;
       const res = await api.importData(data);
-      alert(`Import complete: ${res.imported} imported, ${res.skipped} skipped.`);
+      toast.success(`Import complete: ${res.imported} imported, ${res.skipped} skipped.`);
     } catch (e) {
       setError(
         e instanceof ApiError ? e.message : "Invalid import file.",
@@ -410,6 +721,7 @@ export function SettingsModal({
                   onChange={(e) => {
                     setApiKey(e.target.value);
                     setKeyTouched(true);
+                    setKeyStatus(null);
                   }}
                   placeholder="AIza…"
                   className={`${inputCls} pl-9 pr-10`}
@@ -424,7 +736,31 @@ export function SettingsModal({
                   {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+              <button
+                onClick={testKey}
+                disabled={testingKey}
+                className="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+              >
+                {testingKey ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <KeyRound size={14} />
+                )}
+                Test Key
+              </button>
             </div>
+            {keyStatus && (
+              <div
+                role="status"
+                className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                  keyStatus.ok
+                    ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                    : "bg-red-50 text-red-700 dark:bg-red-950/50 dark:text-red-300"
+                }`}
+              >
+                {keyStatus.message}
+              </div>
+            )}
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {settings?.serverKeyConfigured
                 ? "A server-side GEMINI_API_KEY is configured; a key saved here overrides it. "
@@ -440,22 +776,26 @@ export function SettingsModal({
 
           <Section title="Defaults">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="block">
+              <div>
                 <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
                   Default voice
                 </span>
-                <select
-                  value={voice}
-                  onChange={(e) => setVoice(e.target.value)}
-                  className={inputCls}
-                >
-                  {VOICE_NAMES.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                <div className="flex gap-2">
+                  <select
+                    value={voice}
+                    onChange={(e) => setVoice(e.target.value)}
+                    className={`${inputCls} min-h-[44px] flex-1`}
+                    aria-label="Default voice"
+                  >
+                    {VOICE_NAMES.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                  <VoicePreviewButton voice={voice} />
+                </div>
+              </div>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-zinc-600 dark:text-zinc-300">
                   Default speed: {speed.toFixed(1)}×
@@ -529,6 +869,23 @@ export function SettingsModal({
             </div>
           </Section>
 
+          <Section title="Library sync">
+            <SyncSection />
+          </Section>
+
+          <Section title="Pronunciation">
+            <button
+              onClick={() => setPronOpen(true)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            >
+              <BookOpenText size={16} />
+              Open Pronunciation Dictionary
+            </button>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Fix how names and tricky words are spoken across every document.
+            </p>
+          </Section>
+
           <Section title="Audio cache">
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2.5 text-sm dark:border-zinc-800">
               <span className="text-zinc-600 dark:text-zinc-300">
@@ -576,10 +933,10 @@ export function SettingsModal({
               </p>
               <p className="text-zinc-700 dark:text-zinc-300">
                 <strong className="font-semibold text-zinc-900 dark:text-zinc-100">
-                  Comparison:
+                  Value:
                 </strong>{" "}
-                Speechify costs $139–$249/year, while VocalFlow with Gemini is
-                essentially free or pennies per month.
+                Commercial TTS subscriptions often cost $100–$250/year, while
+                VoxShelf with your Gemini API key is essentially free or pennies per month.
               </p>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center">
@@ -670,6 +1027,7 @@ export function SettingsModal({
           </div>
         </div>
       )}
+      {pronOpen && <PronunciationModal onClose={() => setPronOpen(false)} />}
     </Modal>
   );
 }

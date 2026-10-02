@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { getDocumentDetail, getDocumentText } from "@/lib/documents";
 import { apiError, toApiError } from "@/lib/http";
 import { generatePodcast, listPodcasts } from "@/lib/podcast";
@@ -9,6 +10,8 @@ export const maxDuration = 300;
 
 /** GET /api/ai/podcast?documentId=… — list saved podcast episodes for a document. */
 export async function GET(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const documentId = req.nextUrl.searchParams.get("documentId") || "";
     if (!documentId) return apiError("documentId is required.", 400);
@@ -22,6 +25,8 @@ export async function GET(req: NextRequest) {
 
 /** POST /api/ai/podcast — { documentId, saveAsDocument?, key? } */
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const body = (await req.json()) as {
       documentId?: string;

@@ -1,4 +1,4 @@
-// Shared TypeScript types for VocalFlow (used by both server and client code).
+// Shared TypeScript types for VoxShelf (used by both server and client code).
 
 export type SourceType =
   | "paste"
@@ -263,9 +263,111 @@ export type PrerenderEvent =
 
 export type ReaderFont = "sans" | "serif" | "mono" | "dyslexic";
 
+export type ReaderPageWidth = "narrow" | "comfortable" | "wide";
+
 export interface ReaderPrefs {
   font: ReaderFont;
   fontSize: number;
   lineHeight: number;
   rulerMode: boolean;
+  bionicReading: boolean;
+  focusMask: boolean;
+  pageWidth: ReaderPageWidth;
+}
+
+export interface PronunciationRule {
+  id: string;
+  word: string;
+  replacement: string;
+  caseSensitive: boolean;
+  createdAt: string;
+}
+
+export interface DailyStat {
+  /** YYYY-MM-DD (UTC day bucket). */
+  date: string;
+  minutes: number;
+}
+
+export interface ReadingStats {
+  totalSeconds: number;
+  totalMinutes: number;
+  totalWords: number;
+  currentStreak: number;
+  last7: DailyStat[];
+  /** Hours saved by listening above 1.0x speed. */
+  hoursSaved: number;
+}
+
+export interface ReadingSessionInput {
+  docId: string;
+  durationSeconds: number;
+  wordsRead: number;
+  speed: number;
+}
+
+export interface SyncSummaryDto {
+  ok: boolean;
+  at: string;
+  pushed: number;
+  pulled: number;
+  conflicts: number;
+  rejected: number;
+  skippedOrphans: number;
+  error?: string;
+  serverTime?: string;
+  skewMs?: number;
+}
+
+export interface SyncStatusDto {
+  enabled: boolean;
+  serverUrl: string;
+  mode: "full" | "selective";
+  selection: { docs: string[]; folders: string[] };
+  lastSyncAt: string | null;
+  lastResult: SyncSummaryDto | null;
+  pendingLocal: number;
+  schedulerOn: boolean;
+  /** True when a sync peer API key is stored (the key itself never leaves the server). */
+  syncKeySet: boolean;
+}
+
+export interface RemoteLibraryDoc {
+  id: string;
+  title: string;
+  author: string | null;
+  folderId: string | null;
+  wordCount: number;
+  sentenceCount: number;
+  updatedAt: string;
+}
+
+export interface RemoteLibraryFolder {
+  id: string;
+  name: string;
+  color: string | null;
+  documentCount: number;
+  updatedAt: string;
+}
+
+export interface RemoteLibraryDto {
+  folders: RemoteLibraryFolder[];
+  documents: RemoteLibraryDoc[];
+}
+
+export interface SyncDownloadResult {
+  downloaded: string[];
+  missing: string[];
+  rejected: number;
+  foldersAdded: string[];
+}
+
+export interface SyncRemoveResult {
+  removed: string[];
+  removedFolders: string[];
+}
+
+export interface AuthStatus {
+  locked: boolean;
+  authed: boolean;
 }

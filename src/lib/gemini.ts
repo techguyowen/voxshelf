@@ -294,7 +294,7 @@ export async function chatWithDocument(
     .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content.slice(0, 2000)}`)
     .join("\n");
   const prompt =
-    `You are a helpful reading assistant inside the VocalFlow app. Answer the user's question STRICTLY using only the document content below. ` +
+    `You are a helpful reading assistant inside the VoxShelf app. Answer the user's question STRICTLY using only the document content below. ` +
     `If the answer is not in the document, say so clearly and do not invent facts. ` +
     `Keep answers concise (2-6 sentences) unless the user asks for more detail. Use plain text, no preamble headers.\n\n` +
     `Document title: "${title}"\n\n--- DOCUMENT ---\n${docExcerpt}\n--- END ---\n\n` +

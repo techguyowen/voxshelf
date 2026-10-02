@@ -28,18 +28,31 @@ import {
 } from "react";
 import { usePlayer } from "@/hooks/usePlayer";
 import { api, formatBytes } from "@/lib/client";
+import { getSharedAudio } from "@/lib/globalPlayer";
 import {
   getOfflineDocument,
   isDocumentOnDevice,
   removeDocumentFromDevice,
 } from "@/lib/offlineStore";
 import { applyAutoSkip, loadAutoSkip, saveAutoSkip, type AutoSkipOptions } from "@/lib/autoSkip";
+import { publishNowPlaying } from "@/lib/globalPlayer";
+import { haptic } from "@/lib/haptics";
 import { estimateTtsCostUsd, formatUsd } from "@/lib/pricing";
 import {
+  countWords,
   cumulativeWordCounts,
+  estimateSecondsLeft,
+  formatDuration,
   formatTimeLeftBadge,
   wordsRemainingFrom,
 } from "@/lib/readingTime";
+import {
+  emitVolumeChange,
+  loadMuted,
+  loadVolume,
+  saveMuted,
+  saveVolume,
+} from "@/lib/volume";
 import type {
   Bookmark,
   DocumentDetail,
@@ -51,25 +64,33 @@ import type {
 } from "@/lib/types";
 import { AIDrawer, type TextSelection } from "./AIDrawer";
 import { DownloadToDeviceModal } from "./DownloadToDeviceModal";
+import { TOCDrawer } from "./TOCDrawer";
 import { PrerenderModal } from "./PrerenderModal";
+import { PronunciationModal } from "./PronunciationModal";
 import {
   AppearanceMenu,
   appearanceFontClass,
   loadAppearance,
+  pageWidthClass,
   saveAppearance,
   type AppearancePrefs,
 } from "./AppearanceMenu";
 import { useUI } from "./AppShell";
 import { AutoSkipModal } from "./AutoSkipModal";
 import { PlayerBar } from "./PlayerBar";
+import { useToast } from "./Toast";
 
-const PREFS_KEY = "vf-reader-prefs";
+const PREFS_KEY = "vs-reader-prefs";
+const LEGACY_PREFS_KEY = "vf-reader-prefs";
 
 const DEFAULT_PREFS: ReaderPrefs = {
   font: "sans",
   fontSize: 18,
   lineHeight: 1.8,
   rulerMode: false,
+  bionicReading: false,
+  focusMask: false,
+  pageWidth: "comfortable",
 };
 
 const HIGHLIGHT_SWATCHES: { id: HighlightColor; swatch: string }[] = [
@@ -82,7 +103,8 @@ const HIGHLIGHT_SWATCHES: { id: HighlightColor; swatch: string }[] = [
 
 function loadPrefs(): ReaderPrefs {
   try {
-    const raw = localStorage.getItem(PREFS_KEY);
+    const raw =
+      localStorage.getItem(PREFS_KEY) ?? localStorage.getItem(LEGACY_PREFS_KEY);
     if (!raw) return DEFAULT_PREFS;
     const parsed = JSON.parse(raw) as Partial<ReaderPrefs>;
     return {
@@ -96,18 +118,95 @@ function loadPrefs(): ReaderPrefs {
           ? Math.min(2.6, Math.max(1.3, parsed.lineHeight))
           : 1.8,
       rulerMode: parsed.rulerMode === true,
+      bionicReading: parsed.bionicReading === true,
+      focusMask: parsed.focusMask === true,
+      pageWidth:
+        parsed.pageWidth === "narrow" ||
+        parsed.pageWidth === "comfortable" ||
+        parsed.pageWidth === "wide"
+          ? parsed.pageWidth
+          : "comfortable",
     };
   } catch {
     return DEFAULT_PREFS;
   }
 }
 
+/** Split a word into prefix symbols, bold bionic head, tail, and suffix symbols. */
+function bionicParts(token: string): { prefix: string; head: string; tail: string; suffix: string } {
+  const match = token.match(/^([^\p{L}\p{N}]*)([\p{L}\p{N}'’-]+)(.*)$/u);
+  if (!match) {
+    const half = Math.ceil(token.length / 2);
+    return { prefix: "", head: token.slice(0, half), tail: token.slice(half), suffix: "" };
+  }
+  const prefix = match[1] || "";
+  const core = match[2] || "";
+  const suffix = match[3] || "";
+
+  if (core.length <= 1) {
+    return { prefix, head: core, tail: "", suffix };
+  }
+
+  // True bionic reading fixation ratios:
+  // 1-3 letters -> 1 letter bold
+  // 4-6 letters -> 2 letters bold
+  // 7-9 letters -> 3 letters bold
+  // 10+ letters -> 4-5 letters bold
+  let n = 1;
+  if (core.length <= 3) n = 1;
+  else if (core.length <= 6) n = 2;
+  else if (core.length <= 9) n = 3;
+  else n = Math.min(5, Math.ceil(core.length * 0.45));
+
+  return {
+    prefix,
+    head: core.slice(0, n),
+    tail: core.slice(n),
+    suffix,
+  };
+}
+
+function BionicWord({ word }: { word: string }) {
+  const { prefix, head, tail, suffix } = bionicParts(word);
+  return (
+    <span className="inline">
+      {prefix}
+      <b className="font-extrabold text-zinc-950 dark:text-white" style={{ fontWeight: 800 }}>
+        {head}
+      </b>
+      {tail && <span className="font-normal opacity-85 dark:opacity-80">{tail}</span>}
+      {suffix}
+    </span>
+  );
+}
+
+/** Render a text chunk word-by-word, with optional bionic heads. */
+function TextChunk({ text, bionic }: { text: string; bionic: boolean }) {
+  if (!bionic) return <>{text}</>;
+  const parts = text.split(/(\s+)/);
+  return (
+    <>
+      {parts.map((p, i) =>
+        p === "" || /^\s+$/.test(p) ? (
+          <span key={i}>{p}</span>
+        ) : (
+          <span key={i}>
+            <BionicWord word={p} />
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
 function WordSpans({
   text,
   activeWord,
+  bionic,
 }: {
   text: string;
   activeWord: number;
+  bionic: boolean;
 }) {
   const nodes: React.ReactNode[] = [];
   const parts = text.split(/(\s+)/);
@@ -123,7 +222,7 @@ function WordSpans({
           key={i}
           className={`vf-word${mine === activeWord ? " vf-word-active" : ""}`}
         >
-          {part}
+          {bionic ? <BionicWord word={part} /> : part}
         </span>,
       );
     }
@@ -132,8 +231,16 @@ function WordSpans({
 }
 
 /** Render sentence text with user highlight <mark> ranges applied. */
-function HighlightedText({ text, highlights }: { text: string; highlights: Highlight[] }) {
-  if (highlights.length === 0) return <>{text}</>;
+function HighlightedText({
+  text,
+  highlights,
+  bionic,
+}: {
+  text: string;
+  highlights: Highlight[];
+  bionic: boolean;
+}) {
+  if (highlights.length === 0) return <TextChunk text={text} bionic={bionic} />;
   type Range = { start: number; end: number; color: HighlightColor; id: string };
   const ranges: Range[] = [];
   for (const h of highlights) {
@@ -154,19 +261,29 @@ function HighlightedText({ text, highlights }: { text: string; highlights: Highl
     if (last && r.start < last.end) continue; // skip overlaps
     merged.push(r);
   }
-  if (merged.length === 0) return <>{text}</>;
+  if (merged.length === 0) return <TextChunk text={text} bionic={bionic} />;
   const nodes: React.ReactNode[] = [];
   let pos = 0;
   merged.forEach((r, i) => {
-    if (r.start > pos) nodes.push(<span key={`t${i}`}>{text.slice(pos, r.start)}</span>);
+    if (r.start > pos)
+      nodes.push(
+        <span key={`t${i}`}>
+          <TextChunk text={text.slice(pos, r.start)} bionic={bionic} />
+        </span>,
+      );
     nodes.push(
       <mark key={r.id} className={`vf-hl vf-hl-${r.color}`}>
-        {text.slice(r.start, r.end)}
+        <TextChunk text={text.slice(r.start, r.end)} bionic={bionic} />
       </mark>,
     );
     pos = r.end;
   });
-  if (pos < text.length) nodes.push(<span key="tail">{text.slice(pos)}</span>);
+  if (pos < text.length)
+    nodes.push(
+      <span key="tail">
+        <TextChunk text={text.slice(pos)} bionic={bionic} />
+      </span>,
+    );
   return <>{nodes}</>;
 }
 
@@ -180,6 +297,8 @@ const SentenceItem = memo(function SentenceItem({
   skipped,
   clickable,
   highlights,
+  bionic,
+  dimmed,
   onPlay,
 }: {
   sentence: Sentence;
@@ -191,20 +310,22 @@ const SentenceItem = memo(function SentenceItem({
   skipped: boolean;
   clickable: boolean;
   highlights: Highlight[];
+  bionic: boolean;
+  dimmed: boolean;
   onPlay: (idx: number) => void;
 }) {
   return (
     <p
       data-idx={sentence.idx}
       onClick={clickable ? () => onPlay(sentence.idx) : undefined}
-      className={`vf-sentence${active ? " vf-sentence-active" : ""}${near ? " vf-sentence-near" : ""}${skipped ? " vf-sentence-skipped" : ""}`}
+      className={`vf-sentence${active ? " vf-sentence-active" : ""}${near ? " vf-sentence-near" : ""}${skipped ? " vf-sentence-skipped" : ""}${dimmed && !active ? " opacity-30" : ""}${dimmed ? " transition-opacity" : ""}`}
       style={clickable ? undefined : { cursor: "default" }}
       title={skipped ? "Skipped by auto-skip" : clickable ? "Click to play from here" : undefined}
     >
       {active ? (
-        <WordSpans text={displayText} activeWord={activeWord} />
+        <WordSpans text={displayText} activeWord={activeWord} bionic={bionic} />
       ) : (
-        <HighlightedText text={sentence.text} highlights={highlights} />
+        <HighlightedText text={sentence.text} highlights={highlights} bionic={bionic} />
       )}
       {loading && (
         <Loader2 size={14} className="ml-2 inline animate-spin text-emerald-600" />
@@ -212,6 +333,130 @@ const SentenceItem = memo(function SentenceItem({
     </p>
   );
 });
+
+function formatSleepCountdown(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Segmented timeline: sentence density ticks, hover preview, click to jump. */
+function TimelineScrubber({
+  doc,
+  currentIdx,
+  clipProgress,
+  speed,
+  cum,
+  onJump,
+}: {
+  doc: DocumentDetail;
+  currentIdx: number;
+  clipProgress: number;
+  speed: number;
+  cum: number[];
+  onJump: (idx: number) => void;
+}) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const total = doc.sentences.length;
+  const overall =
+    total <= 1
+      ? 0
+      : Math.min(100, ((currentIdx + clipProgress) / (total - 1)) * 100);
+
+  const ticks = useMemo(() => {
+    if (total <= 1) return [];
+    const step = Math.max(1, Math.floor(total / 120));
+    const out: number[] = [];
+    for (let i = 0; i < total; i += step) out.push(i);
+    return out;
+  }, [total]);
+
+  const idxFromClientX = useCallback(
+    (clientX: number): number => {
+      const el = barRef.current;
+      if (!el || total === 0) return 0;
+      const rect = el.getBoundingClientRect();
+      const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+      return Math.min(total - 1, Math.floor(frac * total));
+    },
+    [total],
+  );
+
+  const hoverLeft =
+    hoverIdx === null || total <= 1 ? 0 : (hoverIdx / (total - 1)) * 100;
+  const hoverSentence = hoverIdx !== null ? doc.sentences[hoverIdx] : undefined;
+  const hoverWords =
+    hoverIdx === null ? 0 : wordsRemainingFrom(cum, hoverIdx, 0);
+
+  return (
+    <div
+      ref={barRef}
+      role="slider"
+      tabIndex={0}
+      aria-label="Document timeline"
+      aria-valuemin={1}
+      aria-valuemax={total}
+      aria-valuenow={currentIdx + 1}
+      aria-valuetext={`Sentence ${currentIdx + 1} of ${total}`}
+      className="group relative mb-4 h-7 cursor-pointer outline-none"
+      onMouseMove={(e) => setHoverIdx(idxFromClientX(e.clientX))}
+      onMouseLeave={() => setHoverIdx(null)}
+      onClick={(e) => {
+        haptic();
+        onJump(idxFromClientX(e.clientX));
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          onJump(Math.max(0, currentIdx - 1));
+        } else if (e.key === "ArrowRight") {
+          e.preventDefault();
+          onJump(Math.min(total - 1, currentIdx + 1));
+        }
+      }}
+    >
+      <div className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-visible rounded-full bg-zinc-200 dark:bg-zinc-800">
+        <div
+          className="h-full rounded-full bg-emerald-500"
+          style={{ width: `${overall}%` }}
+        />
+      </div>
+      {ticks.map((i) => (
+        <span
+          key={i}
+          aria-hidden="true"
+          className="pointer-events-none absolute top-1/2 h-2.5 w-px -translate-y-1/2 bg-zinc-500/50 dark:bg-zinc-400/40"
+          style={{ left: total <= 1 ? "0%" : `${(i / (total - 1)) * 100}%` }}
+        />
+      ))}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-emerald-600 bg-white shadow dark:border-emerald-400 dark:bg-zinc-900"
+        style={{ left: `${overall}%` }}
+      />
+      {hoverIdx !== null && hoverSentence && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-full z-10 mb-1 w-64 -translate-x-1/2 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900"
+          style={{ left: `${Math.min(88, Math.max(12, hoverLeft))}%` }}
+        >
+          <p className="text-[11px] font-semibold tabular-nums">
+            Sentence {hoverIdx + 1} / {total}
+            <span className="ml-1.5 font-normal text-zinc-500 dark:text-zinc-400">
+              {hoverWords > 0
+                ? `${formatDuration(estimateSecondsLeft(hoverWords, speed))} left`
+                : "End"}
+            </span>
+          </p>
+          <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-zinc-600 dark:text-zinc-300">
+            {hoverSentence.text.slice(0, 140)}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 type AiTab = "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" | "highlights";
 
@@ -232,6 +477,7 @@ export function ReaderView({ docId }: { docId: string }) {
   const [showAutoSkip, setShowAutoSkip] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiTab, setAiTab] = useState<AiTab>("summary");
+  const [tocOpen, setTocOpen] = useState(false);
 
   function openAi(tab: AiTab = "summary") {
     setAiTab(tab);
@@ -246,6 +492,9 @@ export function ReaderView({ docId }: { docId: string }) {
   const [prerenderOpen, setPrerenderOpen] = useState(false);
   const [prerenderStats, setPrerenderStats] = useState<PrerenderStats | null>(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [pronOpen, setPronOpen] = useState(false);
+  const [resumeDismissed, setResumeDismissed] = useState(false);
+  const initialProgressRef = useRef<number | null>(null);
   const [offlineMode, setOfflineMode] = useState(false);
   const [onDevice, setOnDevice] = useState<{
     onDevice: boolean;
@@ -254,6 +503,12 @@ export function ReaderView({ docId }: { docId: string }) {
   } | null>(null);
   const articleRef = useRef<HTMLDivElement>(null);
   const { openShortcuts, shortcutsOpen } = useUI();
+  const toast = useToast();
+  // Timestamp until which auto-scroll stays paused after manual interaction.
+  const autoScrollHoldUntil = useRef(0);
+  const resumeAutoScroll = useCallback(() => {
+    autoScrollHoldUntil.current = 0;
+  }, []);
 
   useEffect(() => {
     setPrefs(loadPrefs());
@@ -282,10 +537,13 @@ export function ReaderView({ docId }: { docId: string }) {
     setLoading(true);
     setLoadError(null);
     setOfflineMode(false);
+    setResumeDismissed(false);
+    initialProgressRef.current = null;
     api
       .getDocument(docId)
       .then((d) => {
         if (!live) return;
+        initialProgressRef.current = d.progressSentenceIndex;
         setDoc(d);
         setBookmarks(d.bookmarks);
         setHighlights(d.highlights || []);
@@ -337,12 +595,12 @@ export function ReaderView({ docId }: { docId: string }) {
       removeDocumentFromDevice(docId)
         .then(() => refreshOnDevice())
         .catch((e) =>
-          alert(e instanceof Error ? e.message : "Could not remove download."),
+          toast.error(e instanceof Error ? e.message : "Could not remove download."),
         );
     } else {
       setDownloadOpen(true);
     }
-  }, [onDevice, docId, refreshOnDevice]);
+  }, [onDevice, docId, refreshOnDevice, toast]);
 
   const refreshPrerenderStats = useCallback(() => {
     api.getPrerenderStats(docId).then(setPrerenderStats).catch(() => {});
@@ -385,10 +643,59 @@ export function ReaderView({ docId }: { docId: string }) {
   const handlePlay = useCallback(
     (idx: number) => {
       if (!appearance.clickToListen) return;
+      haptic();
+      setResumeDismissed(true);
+      resumeAutoScroll();
       player.playFrom(idx);
     },
-    [player, appearance.clickToListen],
+    [player, appearance.clickToListen, resumeAutoScroll],
   );
+
+  // Publish now-playing metadata for the floating mini-player + lock screen.
+  // clipProgress is quantized so background subscribers aren't spammed.
+  const quantizedProgress = Math.round(player.clipProgress * 20) / 20;
+  useEffect(() => {
+    if (!doc) return;
+    publishNowPlaying({
+      docId: doc.id,
+      title: doc.title,
+      sentenceIdx: player.currentIdx,
+      sentenceCount: doc.sentenceCount,
+      snippet: (doc.sentences[player.currentIdx]?.text ?? "").slice(0, 80),
+      speed: player.speed,
+      clipProgress: Math.round(player.clipProgress * 20) / 20,
+      status: player.status,
+    });
+  }, [doc, player.currentIdx, player.speed, quantizedProgress, player.status]);
+
+  // Periodic reading-session pings while audio is actually playing.
+  const livePlayerRef = useRef({ idx: 0, speed: 1 });
+  livePlayerRef.current = { idx: player.currentIdx, speed: player.speed };
+  const sessionAnchorRef = useRef(0);
+  const docTextsRef = useRef<string[]>([]);
+  useEffect(() => {
+    sessionAnchorRef.current = player.currentIdx;
+    if (doc) docTextsRef.current = doc.sentences.map((s) => s.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id]);
+  useEffect(() => {
+    if (!doc || player.status !== "playing") return;
+    const docId = doc.id;
+    const iv = setInterval(() => {
+      const { idx, speed } = livePlayerRef.current;
+      const texts = docTextsRef.current;
+      const from = Math.max(0, Math.min(sessionAnchorRef.current, idx));
+      const to = Math.max(0, Math.min(idx, texts.length - 1));
+      let words = 0;
+      for (let i = from; i <= to; i += 1) words += countWords(texts[i] ?? "");
+      if (words <= 0) words = Math.round(15 * 2.5 * speed);
+      sessionAnchorRef.current = idx;
+      api
+        .recordSession({ docId, durationSeconds: 15, wordsRead: words, speed })
+        .catch(() => {});
+    }, 15000);
+    return () => clearInterval(iv);
+  }, [doc, player.status]);
 
   // Auto-play as soon as the file opens (optional).
   const autoPlayedRef = useRef<string | null>(null);
@@ -447,10 +754,25 @@ export function ReaderView({ docId }: { docId: string }) {
     return () => clearTimeout(t);
   }, [doc, player.speed, player.voice, player.stylePrompt]);
 
-  // Auto-scroll the active sentence into view while playing.
+  // Auto-scroll the active sentence into view while playing — but never
+  // fight the user: manual scrolls/touches pause auto-scroll for 4 seconds.
   const firstScroll = useRef(true);
   useEffect(() => {
+    const hold = () => {
+      autoScrollHoldUntil.current = Date.now() + 4000;
+    };
+    window.addEventListener("wheel", hold, { passive: true });
+    window.addEventListener("touchstart", hold, { passive: true });
+    return () => {
+      window.removeEventListener("wheel", hold);
+      window.removeEventListener("touchstart", hold);
+    };
+  }, []);
+  useEffect(() => {
     if (!doc) return;
+    if (Date.now() < autoScrollHoldUntil.current && !firstScroll.current) {
+      return;
+    }
     if (player.status !== "playing" && player.status !== "loading" && !firstScroll.current) {
       return;
     }
@@ -468,6 +790,40 @@ export function ReaderView({ docId }: { docId: string }) {
     }
     firstScroll.current = false;
   }, [doc, player.currentIdx, player.status]);
+
+  // Background tab resync & mobile lockscreen wakeup: when the tab/screen
+  // becomes visible again mid-playback, re-sync the audio cursor state and
+  // smoothly scroll the active sentence back into center view so the visual
+  // state never lags behind the audio.
+  const liveResyncRef = useRef({ idx: 0, status: player.status, resync: player.resync });
+  liveResyncRef.current = { idx: player.currentIdx, status: player.status, resync: player.resync };
+  useEffect(() => {
+    const wake = () => {
+      const live = liveResyncRef.current;
+      if (live.status !== "playing" && live.status !== "loading") return;
+      live.resync();
+      // A backgrounded tab held no manual-scroll intent; clear the hold so
+      // the wake-up scroll always lands on the live sentence.
+      autoScrollHoldUntil.current = 0;
+      const el = articleRef.current?.querySelector(`[data-idx="${live.idx}"]`);
+      if (el) {
+        const reduced = window.matchMedia(
+          "(prefers-reduced-motion: reduce)",
+        ).matches;
+        el.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "center" });
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") wake();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", wake);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", wake);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateSelection = useCallback(() => {
     const sel = window.getSelection();
@@ -506,7 +862,7 @@ export function ReaderView({ docId }: { docId: string }) {
       const rect = sel.getRangeAt(0).getBoundingClientRect();
       const x = Math.min(
         window.innerWidth - 300,
-        Math.max(8, rect.left + rect.width / 2 - 140),
+        Math.max(12, rect.left + rect.width / 2 - 140),
       );
       setSelAnchor({ sentenceIdx: anchorIdx, x, y: rect.top });
     } catch {
@@ -523,6 +879,32 @@ export function ReaderView({ docId }: { docId: string }) {
     setHlNoteOpen(false);
   }, []);
 
+  // Swipe navigation: horizontal swipes on the article step sentences.
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const onArticleTouchStart = useCallback((e: React.TouchEvent) => {
+    const t = e.touches[0];
+    swipeStart.current = t ? { x: t.clientX, y: t.clientY } : null;
+  }, []);
+  const onArticleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      updateSelection();
+      const start = swipeStart.current;
+      swipeStart.current = null;
+      const t = e.changedTouches[0];
+      if (!start || !t || !doc) return;
+      // Don't hijack text-selection gestures.
+      if (window.getSelection()?.toString().trim()) return;
+      const dx = t.clientX - start.x;
+      const dy = t.clientY - start.y;
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      haptic();
+      resumeAutoScroll();
+      if (dx < 0) player.next();
+      else player.prev();
+    },
+    [doc, player, resumeAutoScroll, updateSelection],
+  );
+
   const saveHighlight = useCallback(
     (color: HighlightColor) => {
       if (!doc || !selection || !selAnchor) return;
@@ -536,10 +918,11 @@ export function ReaderView({ docId }: { docId: string }) {
         .then((h) => {
           setHighlights((list) => [...list, h].sort((a, b) => a.sentenceIdx - b.sentenceIdx));
           clearSelection();
+          toast.success("Highlight saved.");
         })
-        .catch((e) => alert(e instanceof Error ? e.message : "Highlight failed."));
+        .catch((e) => toast.error(e instanceof Error ? e.message : "Highlight failed."));
     },
-    [doc, selection, selAnchor, hlNote, clearSelection],
+    [doc, selection, selAnchor, hlNote, clearSelection, toast],
   );
 
   const deleteHighlight = useCallback(
@@ -551,15 +934,34 @@ export function ReaderView({ docId }: { docId: string }) {
     [doc],
   );
 
+  const updateHighlight = useCallback(
+    (id: string, patch: { note?: string | null; color?: HighlightColor }) => {
+      if (!doc) return;
+      api
+        .updateHighlight(doc.id, id, patch)
+        .then((updated) => {
+          setHighlights((list) =>
+            list.map((h) => (h.id === id ? { ...h, ...updated } : h)),
+          );
+        })
+        .catch((e) => toast.error(e instanceof Error ? e.message : "Update failed."));
+    },
+    [doc, toast],
+  );
+
   const addBookmark = useCallback(
     (note: string) => {
       if (!doc) return;
+      haptic();
       api
         .addBookmark(doc.id, player.currentIdx, note || undefined)
-        .then((b) => setBookmarks((list) => [...list, b].sort((a, c) => a.sentenceIdx - c.sentenceIdx)))
-        .catch((e) => alert(e instanceof Error ? e.message : "Bookmark failed."));
+        .then((b) => {
+          setBookmarks((list) => [...list, b].sort((a, c) => a.sentenceIdx - c.sentenceIdx));
+          toast.success(`Bookmarked sentence ${player.currentIdx + 1}.`);
+        })
+        .catch((e) => toast.error(e instanceof Error ? e.message : "Bookmark failed."));
     },
-    [doc, player],
+    [doc, player, toast],
   );
 
   const deleteBookmark = useCallback(
@@ -573,7 +975,10 @@ export function ReaderView({ docId }: { docId: string }) {
 
   const jumpTo = useCallback(
     (idx: number) => {
+      haptic();
       setAiOpen(false);
+      setResumeDismissed(true);
+      resumeAutoScroll();
       player.playFrom(idx);
       requestAnimationFrame(() => {
         articleRef.current
@@ -581,8 +986,65 @@ export function ReaderView({ docId }: { docId: string }) {
           ?.scrollIntoView({ block: "center" });
       });
     },
-    [player],
+    [player, resumeAutoScroll],
   );
+
+  const jumpToResume = useCallback(() => {
+    if (!doc) return;
+    haptic();
+    setResumeDismissed(true);
+    resumeAutoScroll();
+    const idx = Math.max(
+      0,
+      Math.min(doc.sentenceCount - 1, initialProgressRef.current ?? 0),
+    );
+    player.playFrom(idx);
+    requestAnimationFrame(() => {
+      articleRef.current
+        ?.querySelector(`[data-idx="${idx}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [doc, player, resumeAutoScroll]);
+
+  /** TOC chapter jump: scroll to center, keep playing only if playing. */
+  const jumpToChapter = useCallback(
+    (idx: number) => {
+      haptic();
+      setTocOpen(false);
+      setResumeDismissed(true);
+      resumeAutoScroll();
+      if (player.status === "playing" || player.status === "loading") {
+        player.playFrom(idx);
+      } else {
+        player.seekTo(idx);
+      }
+      requestAnimationFrame(() => {
+        articleRef.current
+          ?.querySelector(`[data-idx="${idx}"]`)
+          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    },
+    [player, resumeAutoScroll],
+  );
+
+  /** Global mute toggle (the "M" shortcut); PlayerBar syncs via event. */
+  const toggleMute = useCallback(() => {
+    haptic();
+    const audio = getSharedAudio();
+    const currentlyMuted = audio ? audio.muted : loadMuted();
+    const next = !currentlyMuted;
+    if (audio) {
+      try {
+        audio.muted = next;
+        if (!next && audio.volume === 0) audio.volume = 0.8;
+      } catch {
+        // ignore
+      }
+    }
+    saveMuted(next);
+    if (!next && loadVolume() === 0) saveVolume(0.8);
+    emitVolumeChange();
+  }, []);
 
   const overallPct = useMemo(() => {
     if (!doc || doc.sentenceCount <= 1) return 0;
@@ -613,6 +1075,7 @@ export function ReaderView({ docId }: { docId: string }) {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Escape") {
       if (aiOpen) setAiOpen(false);
+      else if (tocOpen) setTocOpen(false);
       else if (showAutoSkip) setShowAutoSkip(false);
       else if (showAppearance) setShowAppearance(false);
       return;
@@ -631,15 +1094,18 @@ export function ReaderView({ docId }: { docId: string }) {
     switch (e.key) {
       case " ":
         e.preventDefault();
+        haptic();
         player.toggle();
         break;
       case "ArrowLeft":
         e.preventDefault();
+        haptic();
         if (e.shiftKey) void player.skip(-15);
         else player.prev();
         break;
       case "ArrowRight":
         e.preventDefault();
+        haptic();
         if (e.shiftKey) void player.skip(15);
         else player.next();
         break;
@@ -651,6 +1117,14 @@ export function ReaderView({ docId }: { docId: string }) {
         e.preventDefault();
         player.setSpeed(Math.round((player.speed - 0.1) * 10) / 10);
         break;
+      case "[":
+        e.preventDefault();
+        player.setSpeed(Math.round((player.speed - 0.1) * 10) / 10);
+        break;
+      case "]":
+        e.preventDefault();
+        player.setSpeed(Math.round((player.speed + 0.1) * 10) / 10);
+        break;
       default: {
         // Shift+arrows handled above; ignore other shifted keys.
         // ("?" cheat-sheet toggle lives in AppShell.)
@@ -660,6 +1134,15 @@ export function ReaderView({ docId }: { docId: string }) {
         else if (k === "r")
           setPrefs((p) => ({ ...p, rulerMode: !p.rulerMode }));
         else if (k === "a") openAi("summary");
+        else if (k === "p") openAi("podcast");
+        else if (k === "j") {
+          haptic();
+          player.next();
+        } else if (k === "k") {
+          haptic();
+          player.prev();
+        } else if (k === "m") toggleMute();
+        else if (k === "t") setTocOpen((v) => !v);
         break;
       }
     }
@@ -699,7 +1182,7 @@ export function ReaderView({ docId }: { docId: string }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl pb-72 pt-4">
+    <div className={`mx-auto w-full ${pageWidthClass(prefs.pageWidth)} pb-72 pt-4`}>
       <div className="mb-3 flex items-center gap-2">
         <Link
           href="/"
@@ -749,6 +1232,18 @@ export function ReaderView({ docId }: { docId: string }) {
           title="Bookmark current sentence (B)"
         >
           <BookmarkPlus size={19} />
+        </button>
+        <button
+          onClick={() => setTocOpen((v) => !v)}
+          className={`flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold ${tocOpen ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
+          aria-label="Open table of contents"
+          title="Table of contents (T)"
+          aria-expanded={tocOpen}
+        >
+          <span role="img" aria-hidden="true">
+            📑
+          </span>
+          <span className="hidden sm:inline">TOC</span>
         </button>
         <button
           onClick={() => openAi("summary")}
@@ -826,6 +1321,52 @@ export function ReaderView({ docId }: { docId: string }) {
           <Timer size={12} />
           {timeLeftLabel}
         </span>
+        {player.sleepLeft !== null ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold tabular-nums text-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
+            ⏳ {formatSleepCountdown(player.sleepLeft)}
+            <button
+              onClick={() => player.setSleep(null)}
+              aria-label="Cancel sleep timer"
+              className="rounded-full p-0.5 hover:bg-amber-200 dark:hover:bg-amber-900"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ) : player.sleepEndOfDoc ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800 dark:bg-amber-950/70 dark:text-amber-300">
+            Stops at end of document
+            <button
+              onClick={() => player.setSleep(null)}
+              aria-label="Cancel sleep timer"
+              className="rounded-full p-0.5 hover:bg-amber-200 dark:hover:bg-amber-900"
+            >
+              <X size={12} />
+            </button>
+          </span>
+        ) : (
+          <label className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-zinc-200/70 px-2.5 py-1 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+            <Timer size={12} />
+            <select
+              value=""
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "end") player.setSleep("end");
+                else if (v) player.setSleep(Number(v));
+                e.target.value = "";
+              }}
+              className="cursor-pointer bg-transparent outline-none dark:bg-zinc-800"
+              aria-label="Sleep timer"
+            >
+              <option value="">Sleep</option>
+              <option value="5">5 min</option>
+              <option value="15">15 min</option>
+              <option value="30">30 min</option>
+              <option value="45">45 min</option>
+              <option value="60">60 min</option>
+              <option value="end">End of document</option>
+            </select>
+          </label>
+        )}
         <span
           className="inline-flex items-center gap-1 rounded-full bg-zinc-200/70 px-2.5 py-1 text-[11px] font-medium tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
           title={`Full-document synthesis estimate for ${doc.totalChars.toLocaleString()} characters at ~$0.02 / 100k chars`}
@@ -842,16 +1383,20 @@ export function ReaderView({ docId }: { docId: string }) {
             Auto-skip {autoSkip.mode === "ai" ? "AI" : "Rules"}
           </button>
         )}
-        {highlights.length > 0 && (
-          <button
-            onClick={() => openAi("highlights")}
-            className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:hover:bg-amber-900"
-            title="Open highlights and notes"
-          >
-            <Highlighter size={12} />
-            {highlights.length} highlight{highlights.length === 1 ? "" : "s"}
-          </button>
-        )}
+        <button
+          onClick={() => openAi("highlights")}
+          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+            highlights.length > 0
+              ? "bg-amber-100 text-amber-800 hover:bg-amber-200 dark:bg-amber-950/70 dark:text-amber-300 dark:hover:bg-amber-900"
+              : "bg-zinc-200/70 text-zinc-600 hover:bg-zinc-300/70 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+          }`}
+          title="Open notes & highlights drawer"
+        >
+          <Highlighter size={12} />
+          {highlights.length > 0
+            ? `${highlights.length} note${highlights.length === 1 ? "" : "s"} / highlight${highlights.length === 1 ? "" : "s"}`
+            : "Notes & Highlights"}
+        </button>
         {onDevice?.onDevice && (
           <span
             className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white dark:bg-emerald-500 dark:text-zinc-950"
@@ -879,28 +1424,35 @@ export function ReaderView({ docId }: { docId: string }) {
             lineHeight={prefs.lineHeight}
             onFontSize={(v) => setPrefs((p) => ({ ...p, fontSize: v }))}
             onLineHeight={(v) => setPrefs((p) => ({ ...p, lineHeight: v }))}
+            bionicReading={prefs.bionicReading}
+            focusMask={prefs.focusMask}
+            onBionicReading={(v) => setPrefs((p) => ({ ...p, bionicReading: v }))}
+            onFocusMask={(v) => setPrefs((p) => ({ ...p, focusMask: v }))}
+            pageWidth={prefs.pageWidth}
+            onPageWidth={(v) => setPrefs((p) => ({ ...p, pageWidth: v }))}
+            onOpenPronunciations={() => setPronOpen(true)}
           />
         </div>
       )}
 
-      <div
-        className="mb-4 h-1 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800"
-        role="progressbar"
-        aria-valuenow={overallPct}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Reading progress"
-      >
-        <div
-          className="h-full rounded-full bg-emerald-500"
-          style={{ width: `${overallPct}%` }}
-        />
-      </div>
+      <TimelineScrubber
+        doc={doc}
+        currentIdx={player.currentIdx}
+        clipProgress={player.clipProgress}
+        speed={player.speed}
+        cum={sentenceWordCum}
+        onJump={(idx) => {
+          setResumeDismissed(true);
+          resumeAutoScroll();
+          player.playFrom(idx);
+        }}
+      />
 
       <div
         ref={articleRef}
         onMouseUp={updateSelection}
-        onTouchEnd={updateSelection}
+        onTouchStart={onArticleTouchStart}
+        onTouchEnd={onArticleTouchEnd}
         onKeyUp={updateSelection}
         data-cursor={appearance.cursorColor}
         data-highlight={appearance.highlightSentence ? "on" : "off"}
@@ -921,6 +1473,8 @@ export function ReaderView({ docId }: { docId: string }) {
               skipped={filtered?.skipped ?? false}
               clickable={appearance.clickToListen}
               highlights={highlightsBySentence.get(s.idx) || []}
+              bionic={prefs.bionicReading}
+              dimmed={prefs.focusMask}
               onPlay={handlePlay}
             />
           );
@@ -928,8 +1482,7 @@ export function ReaderView({ docId }: { docId: string }) {
       </div>
 
       <p className="mt-3 text-center text-xs text-zinc-400">
-        Click any sentence to play from there · Select text, then open the AI
-        assistant to explain it
+        Click any sentence to play from there · Select text to add notes or highlight · Open Notes drawer to copy with context
       </p>
 
       {/* Floating selection toolbar: 1-click highlight + note */}
@@ -945,16 +1498,16 @@ export function ReaderView({ docId }: { docId: string }) {
               <button
                 key={c.id}
                 onClick={() => saveHighlight(c.id)}
-                title={`Highlight ${c.id}`}
+                title={`Highlight & save note (${c.id})`}
                 aria-label={`Highlight ${c.id}`}
-                className="h-7 w-7 rounded-full border-2 border-transparent transition-transform hover:scale-110 hover:border-zinc-900 dark:hover:border-white"
+                className="h-7 w-7 rounded-full border-2 border-transparent transition-transform hover:scale-110 hover:border-zinc-900 dark:hover:border-white shadow-sm"
                 style={{ backgroundColor: c.swatch }}
               />
             ))}
             <button
               onClick={() => setHlNoteOpen((v) => !v)}
-              title="Add note"
-              className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium ${hlNoteOpen ? "bg-zinc-200 dark:bg-zinc-700" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
+              title="Add note to selection"
+              className={`flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${hlNoteOpen ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200" : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"}`}
             >
               <StickyNote size={14} /> Note
             </button>
@@ -967,7 +1520,7 @@ export function ReaderView({ docId }: { docId: string }) {
             </button>
           </div>
           {hlNoteOpen && (
-            <div className="mt-2 flex gap-1.5">
+            <div className="mt-2 flex gap-1.5 items-center">
               <input
                 autoFocus
                 value={hlNote}
@@ -975,15 +1528,60 @@ export function ReaderView({ docId }: { docId: string }) {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") saveHighlight("yellow");
                 }}
-                placeholder="Add a note, then pick a color…"
-                className="w-56 rounded-lg border border-zinc-300 px-2 py-1.5 text-xs outline-none focus:border-emerald-500 dark:border-zinc-700 dark:bg-zinc-950"
+                placeholder="Type your note, then press Enter or click a color…"
+                className="w-64 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100"
               />
+              <button
+                onClick={() => saveHighlight("yellow")}
+                className="rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950"
+              >
+                Save
+              </button>
             </div>
           )}
         </div>
       )}
 
+      {(initialProgressRef.current ?? 0) > 0 &&
+        !resumeDismissed &&
+        player.status === "idle" && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-44 z-30 flex justify-center px-4">
+            <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full bg-zinc-900 py-2 pl-4 pr-2 text-sm text-white shadow-xl animate-fade-up dark:bg-zinc-100 dark:text-zinc-900">
+              <span className="truncate">
+                Resume from sentence #{(initialProgressRef.current ?? 0) + 1} (
+                {Math.max(
+                  1,
+                  Math.round(
+                    wordsRemainingFrom(
+                      sentenceWordCum,
+                      initialProgressRef.current ?? 0,
+                      0,
+                    ) /
+                      150 /
+                      player.speed,
+                  ),
+                )}{" "}
+                min left)
+              </span>
+              <button
+                onClick={jumpToResume}
+                className="shrink-0 rounded-full bg-emerald-500 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-600"
+              >
+                Jump
+              </button>
+              <button
+                onClick={() => setResumeDismissed(true)}
+                aria-label="Dismiss resume suggestion"
+                className="shrink-0 rounded-full p-1 text-zinc-400 hover:bg-zinc-700 hover:text-white dark:text-zinc-500 dark:hover:bg-zinc-300 dark:hover:text-zinc-900"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+
       <PlayerBar player={player} doc={doc} onOpenAI={() => openAi("summary")} />
+      {pronOpen && <PronunciationModal onClose={() => setPronOpen(false)} />}
       <AutoSkipModal
         open={showAutoSkip}
         onClose={() => setShowAutoSkip(false)}
@@ -1012,6 +1610,13 @@ export function ReaderView({ docId }: { docId: string }) {
           onDone={refreshOnDevice}
         />
       )}
+      <TOCDrawer
+        open={tocOpen}
+        onClose={() => setTocOpen(false)}
+        sentences={doc.sentences}
+        currentIdx={player.currentIdx}
+        onJump={jumpToChapter}
+      />
       <AIDrawer
         open={aiOpen}
         onClose={() => setAiOpen(false)}
@@ -1024,6 +1629,7 @@ export function ReaderView({ docId }: { docId: string }) {
         onDeleteBookmark={deleteBookmark}
         highlights={highlights}
         onDeleteHighlight={deleteHighlight}
+        onUpdateHighlight={updateHighlight}
         initialTab={aiTab}
       />
     </div>

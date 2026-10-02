@@ -1,4 +1,4 @@
-// Gemini pricing estimates for VocalFlow's cost-transparency UI.
+// Gemini pricing estimates for VoxShelf's cost-transparency UI.
 // Shared by server code (audioCache) and client components.
 
 /** Gemini TTS: ~$0.02 per 100k characters (~$0.20 / 1M chars). */

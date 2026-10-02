@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { getDocumentText, getDocumentDetail } from "@/lib/documents";
 import { summarizeDocument } from "@/lib/gemini";
 import { apiError, toApiError } from "@/lib/http";
@@ -9,6 +10,8 @@ export const maxDuration = 300;
 
 /** POST /api/ai/summary — { documentId? | (title? + text), length?, key? } */
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const body = (await req.json()) as {
       documentId?: string;

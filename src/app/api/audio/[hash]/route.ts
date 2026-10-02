@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { getCachedAudio } from "@/lib/audioCache";
 
 export const runtime = "nodejs";
@@ -7,9 +8,11 @@ export const dynamic = "force-dynamic";
 
 /** GET /api/audio/[hash] — stream a cached WAV file (immutable, cacheable). */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ hash: string }> },
 ) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   const { hash } = await params;
   const cached = getCachedAudio(hash);
   if (!cached) {

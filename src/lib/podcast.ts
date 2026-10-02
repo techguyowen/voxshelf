@@ -124,13 +124,14 @@ export async function generatePodcast(
   const id = randomUUID();
   const ts = new Date().toISOString();
   dbRun(
-    "INSERT INTO podcasts (id, doc_id, title, script, audio_hash, duration_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO podcasts (id, doc_id, title, script, audio_hash, duration_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     id,
     docId,
     script.title,
     JSON.stringify(script.lines),
     saved.hash,
     saved.durationMs,
+    ts,
     ts,
   );
   const row = dbGet<PodcastRow>("SELECT * FROM podcasts WHERE id = ?", id);

@@ -4,6 +4,7 @@ import {
   getPrerenderStats,
   updateSentenceAudio,
 } from "@/lib/documents";
+import { requireAuth } from "@/lib/auth";
 import { apiError } from "@/lib/http";
 import { synthesizeAndCache } from "@/lib/tts";
 import { isValidVoice } from "@/lib/voices";
@@ -35,9 +36,11 @@ function sleep(ms: number): Promise<void> {
  * GET /api/documents/[id]/prerender — offline-readiness stats for a document.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   const { id } = await params;
   const stats = getPrerenderStats(id);
   if (!stats) return apiError("Document not found.", 404);
@@ -54,6 +57,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   const { id } = await params;
   const doc = getDocumentDetail(id);
   if (!doc) return apiError("Document not found.", 404);

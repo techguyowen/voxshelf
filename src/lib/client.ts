@@ -1,6 +1,7 @@
 // Client-side API helpers (fetch wrappers) + small formatters.
 
 import type {
+  AuthStatus,
   Bookmark,
   CacheStats,
   ChatMessage,
@@ -17,8 +18,16 @@ import type {
   PrerenderEvent,
   PrerenderOptions,
   PrerenderStats,
+  PronunciationRule,
   PublicSettings,
   QuizResult,
+  ReadingSessionInput,
+  ReadingStats,
+  RemoteLibraryDto,
+  SyncDownloadResult,
+  SyncRemoveResult,
+  SyncStatusDto,
+  SyncSummaryDto,
   TtsResponse,
   VoiceInfo,
 } from "./types";
@@ -222,6 +231,8 @@ export const api = {
     get<{ highlights: Highlight[] }>(`/api/documents/${docId}/highlights`),
   addHighlight: (docId: string, input: { sentenceIdx: number; text: string; color?: HighlightColor; note?: string }) =>
     send<Highlight>(`/api/documents/${docId}/highlights`, "POST", input),
+  updateHighlight: (docId: string, highlightId: string, input: { note?: string | null; color?: HighlightColor }) =>
+    send<Highlight>(`/api/documents/${docId}/highlights/${highlightId}`, "PATCH", input),
   deleteHighlight: (docId: string, highlightId: string) =>
     send<{ ok: boolean }>(`/api/documents/${docId}/highlights/${highlightId}`, "DELETE"),
 
@@ -241,6 +252,36 @@ export const api = {
   cacheStats: () => get<CacheStats>("/api/cache"),
   clearCache: () => send<{ ok: boolean; removed: number; bytes: number }>("/api/cache", "DELETE"),
   importData: (data: unknown) => send<{ ok: boolean; imported: number; skipped: number }>("/api/data/import", "POST", data),
+
+  listPronunciations: () =>
+    get<{ rules: PronunciationRule[] }>("/api/pronunciations"),
+  savePronunciation: (input: { id?: string; word: string; replacement: string; caseSensitive?: boolean }) =>
+    send<{ rules: PronunciationRule[] }>("/api/pronunciations", "POST", input),
+  deletePronunciation: (id: string) =>
+    send<{ ok: boolean }>(`/api/pronunciations?id=${encodeURIComponent(id)}`, "DELETE"),
+
+  getStats: () => get<ReadingStats>("/api/stats"),
+  recordSession: (input: ReadingSessionInput) =>
+    send<{ ok: boolean }>("/api/stats/session", "POST", input),
+
+  syncStatus: () => get<SyncStatusDto>("/api/sync/status"),
+  syncConfig: (patch: {
+    serverUrl?: string;
+    enabled?: boolean;
+    apiKey?: string;
+    mode?: "full" | "selective";
+  }) => send<SyncStatusDto>("/api/sync/config", "POST", patch),
+  syncNow: () => send<SyncSummaryDto>("/api/sync/now", "POST"),
+  syncRemoteLibrary: () => get<RemoteLibraryDto>("/api/sync/remote-library"),
+  syncDownload: (pick: { docIds?: string[]; folderIds?: string[] }) =>
+    send<SyncDownloadResult>("/api/sync/download", "POST", pick),
+  syncRemove: (pick: { docIds?: string[]; folderIds?: string[] }) =>
+    send<SyncRemoveResult>("/api/sync/remove", "POST", pick),
+
+  authStatus: () => get<AuthStatus>("/api/auth/status"),
+  authLogin: (key: string) =>
+    send<{ ok: boolean; locked: boolean }>("/api/auth/login", "POST", { key }),
+  authLogout: () => send<{ ok: boolean }>("/api/auth/logout", "POST"),
 };
 
 export function formatBytes(bytes: number): string {
@@ -268,6 +309,6 @@ export function downloadTextFile(filename: string, text: string, mime = "text/pl
 }
 
 export function safeFilename(name: string, ext: string): string {
-  const base = name.replace(/[^\w\d-_]+/g, "_").slice(0, 80) || "vocalflow";
+  const base = name.replace(/[^\w\d-_]+/g, "_").slice(0, 80) || "voxshelf";
   return `${base}.${ext}`;
 }

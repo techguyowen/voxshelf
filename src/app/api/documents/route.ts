@@ -5,6 +5,7 @@ import {
   listDocuments,
   type ListOptions,
 } from "@/lib/documents";
+import { requireAuth } from "@/lib/auth";
 import { apiError, toApiError } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -12,6 +13,8 @@ export const dynamic = "force-dynamic";
 
 /** GET /api/documents?q=&tag=&sort=&archived=1 — library listing + tag list. */
 export async function GET(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const sp = req.nextUrl.searchParams;
     const sort = sp.get("sort");
@@ -19,7 +22,11 @@ export async function GET(req: NextRequest) {
       q: sp.get("q") || undefined,
       tag: sp.get("tag") || undefined,
       sort:
-        sort === "created" || sort === "title" || sort === "progress"
+        sort === "created" ||
+        sort === "title" ||
+        sort === "progress" ||
+        sort === "length-desc" ||
+        sort === "length-asc"
           ? sort
           : "updated",
       includeArchived: sp.get("archived") === "1",
@@ -36,6 +43,8 @@ export async function GET(req: NextRequest) {
 
 /** POST /api/documents — create a document from extracted/pasted text. */
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const body = (await req.json()) as {
       title?: string;

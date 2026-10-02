@@ -1,4 +1,5 @@
-import { DB_PATH, ensureDirs } from "./paths";
+import { copyFileSync, existsSync } from "fs";
+import { DB_PATH, LEGACY_DB_PATH, ensureDirs } from "./paths";
 
 // Server-only SQLite access. Prefers better-sqlite3 and falls back to the
 // built-in node:sqlite module when the native binding is unavailable.
@@ -200,6 +201,17 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_doc ON bookmarks(doc_id);
 CREATE INDEX IF NOT EXISTS idx_highlights_doc ON highlights(doc_id);
 CREATE INDEX IF NOT EXISTS idx_podcasts_doc ON podcasts(doc_id);
 CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents(updated_at);
+CREATE TABLE IF NOT EXISTS _sync_tombstones (
+  table_name TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  PRIMARY KEY (table_name, row_id)
+);
+CREATE TABLE IF NOT EXISTS _sync_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_tombstones_time ON _sync_tombstones(deleted_at);
 `;
 
 export function addColumnIfNotExists(
@@ -318,6 +330,40 @@ const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    name: "add_sync_support_columns_and_tables",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS _sync_tombstones (
+          table_name TEXT NOT NULL,
+          row_id TEXT NOT NULL,
+          deleted_at TEXT NOT NULL,
+          PRIMARY KEY (table_name, row_id)
+        );
+        CREATE TABLE IF NOT EXISTS _sync_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_tombstones_time ON _sync_tombstones(deleted_at);
+      `);
+      // Per-row write stamps so two-way sync can order concurrent edits.
+      // Existing rows inherit created_at (same ISO format, comparable).
+      for (const table of [
+        "bookmarks",
+        "highlights",
+        "folders",
+        "podcasts",
+        "pronunciation_dictionary",
+      ]) {
+        if (addColumnIfNotExists(db, table, "updated_at", "TEXT NOT NULL DEFAULT ''")) {
+          db.exec(
+            `UPDATE ${table} SET updated_at = created_at WHERE updated_at = '';`,
+          );
+        }
+      }
+    },
+  },
 ];
 
 function runMigrations(db: DbHandle): void {
@@ -356,9 +402,25 @@ export function dbEngine(): string {
   return engine;
 }
 
+/** One-time upgrade: copy a pre-rename vocalflow.db (+WAL) to voxshelf.db. */
+function migrateLegacyDb(): void {
+  if (DB_PATH === LEGACY_DB_PATH) return;
+  try {
+    if (existsSync(DB_PATH) || !existsSync(LEGACY_DB_PATH)) return;
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const src = LEGACY_DB_PATH + suffix;
+      if (existsSync(src)) copyFileSync(src, DB_PATH + suffix);
+    }
+    console.log(`Migrated legacy database ${LEGACY_DB_PATH} to ${DB_PATH}.`);
+  } catch (err) {
+    console.error("Legacy database migration failed:", err);
+  }
+}
+
 export function getDb(): DbHandle {
   if (!handle) {
     ensureDirs();
+    migrateLegacyDb();
     handle = openBetterSqlite3();
     engine = handle ? "better-sqlite3" : "none";
     if (!handle) {
@@ -385,4 +447,40 @@ export function dbAll<T>(sql: string, ...params: unknown[]): T[] {
 
 export function dbRun(sql: string, ...params: unknown[]): RunResult {
   return getDb().prepare(sql).run(...params);
+}
+
+/**
+ * Record a delete so two-way sync can propagate it. Keeps the newest
+ * deleted_at per row; tombstones are never pruned automatically (see SYNC.md).
+ */
+export function recordTombstone(table: string, rowId: string): void {
+  dbRun(
+    `INSERT INTO _sync_tombstones (table_name, row_id, deleted_at) VALUES (?, ?, ?)
+     ON CONFLICT(table_name, row_id) DO UPDATE SET deleted_at = excluded.deleted_at
+     WHERE excluded.deleted_at > _sync_tombstones.deleted_at`,
+    table,
+    rowId,
+    new Date().toISOString(),
+  );
+}
+
+/** Device-local key/value store (server URL, sync cursors). Never synced. */
+export function getSyncMeta(key: string, fallback = ""): string {
+  try {
+    const row = dbGet<{ value: string }>(
+      "SELECT value FROM _sync_meta WHERE key = ?",
+      key,
+    );
+    return row?.value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setSyncMeta(key: string, value: string): void {
+  dbRun(
+    "INSERT INTO _sync_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    key,
+    value,
+  );
 }

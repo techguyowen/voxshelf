@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { getDocumentDetail, getDocumentText } from "@/lib/documents";
 import { chatWithDocument, type ChatHistoryMessage } from "@/lib/gemini";
 import { apiError, toApiError } from "@/lib/http";
@@ -9,6 +10,8 @@ export const maxDuration = 180;
 
 /** POST /api/ai/chat — { documentId, messages?, userQuestion, key? } */
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const body = (await req.json()) as {
       documentId?: string;

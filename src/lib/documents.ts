@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { dbAll, dbGet, dbRun, getDb } from "./db";
+import { dbAll, dbGet, dbRun, getDb, recordTombstone } from "./db";
 import { countWords, splitSentences } from "./text";
 import type {
   Bookmark,
@@ -235,7 +235,7 @@ export function createDocument(input: CreateDocumentInput): DocumentSummary {
 export interface ListOptions {
   q?: string;
   tag?: string;
-  sort?: "updated" | "created" | "title" | "progress";
+  sort?: "updated" | "created" | "title" | "progress" | "length-desc" | "length-asc";
   includeArchived?: boolean;
   /** "unfiled" filters to folder_id IS NULL; otherwise an exact folder id. */
   folderId?: string;
@@ -260,10 +260,14 @@ export function listDocuments(opts: ListOptions = {}): DocumentSummary[] {
     where.push("folder_id = ?");
     params.push(opts.folderId);
   }
-  let order = "updated_at DESC";
+  // Default "Recently Read / Updated": most recent listening progress first,
+  // falling back to the edit timestamp for never-played documents.
+  let order = "COALESCE(progress_updated_at, updated_at) DESC";
   if (opts.sort === "created") order = "created_at DESC";
   else if (opts.sort === "title") order = "title COLLATE NOCASE ASC";
   else if (opts.sort === "progress") order = "progress_updated_at DESC";
+  else if (opts.sort === "length-desc") order = "word_count DESC";
+  else if (opts.sort === "length-asc") order = "word_count ASC";
   const sql = `SELECT documents.*, (SELECT COUNT(*) FROM sentences s WHERE s.doc_id = documents.id AND s.audio_hash IS NOT NULL) AS cached_sentences FROM documents${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY ${order} LIMIT 500`;
   return dbAll<DocumentRow & { cached_sentences: number }>(sql, ...params).map(toSummary);
 }
@@ -303,6 +307,7 @@ export function getDocumentText(id: string): string | null {
 
 export interface UpdateDocumentPatch {
   title?: string;
+  author?: string | null;
   voice?: string;
   stylePrompt?: string | null;
   speed?: number;
@@ -326,6 +331,11 @@ export function updateDocument(
   if (patch.title !== undefined) {
     sets.push("title = ?");
     params.push(patch.title.trim().slice(0, 300) || "Untitled");
+    touchUpdated = true;
+  }
+  if (patch.author !== undefined) {
+    sets.push("author = ?");
+    params.push(patch.author?.trim().slice(0, 300) || null);
     touchUpdated = true;
   }
   if (patch.voice !== undefined && isValidVoice(patch.voice)) {
@@ -396,7 +406,22 @@ export function updateDocument(
 
 export function deleteDocument(id: string): boolean {
   const r = dbRun("DELETE FROM documents WHERE id = ?", id);
+  if (r.changes > 0) recordTombstone("documents", id);
   return r.changes > 0;
+}
+
+/**
+ * Remove a document from THIS device only (selective-sync "remove from
+ * device"). No tombstone: the peer keeps its copy. Children cascade.
+ */
+export function deleteDocumentLocal(id: string): boolean {
+  return dbRun("DELETE FROM documents WHERE id = ?", id).changes > 0;
+}
+
+/** Remove a folder row locally without tombstoning (selective sync). */
+export function deleteFolderLocal(id: string): boolean {
+  dbRun("UPDATE documents SET folder_id = NULL WHERE folder_id = ?", id);
+  return dbRun("DELETE FROM folders WHERE id = ?", id).changes > 0;
 }
 
 export function updateSentenceAudio(
@@ -458,11 +483,12 @@ export function addBookmark(
   const id = randomUUID();
   const ts = nowIso();
   dbRun(
-    "INSERT INTO bookmarks (id, doc_id, sentence_idx, note, created_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO bookmarks (id, doc_id, sentence_idx, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
     id,
     docId,
     idx,
     note?.trim().slice(0, 500) || null,
+    ts,
     ts,
   );
   const sentence = dbGet<{ text: string }>(
@@ -492,7 +518,9 @@ export function listBookmarks(docId: string): Bookmark[] {
 }
 
 export function deleteBookmark(id: string): boolean {
-  return dbRun("DELETE FROM bookmarks WHERE id = ?", id).changes > 0;
+  const changed = dbRun("DELETE FROM bookmarks WHERE id = ?", id).changes > 0;
+  if (changed) recordTombstone("bookmarks", id);
+  return changed;
 }
 
 export function addHighlight(
@@ -511,13 +539,14 @@ export function addHighlight(
   const ts = nowIso();
   const c = normalizeHighlightColor(color);
   dbRun(
-    "INSERT INTO highlights (id, doc_id, sentence_idx, text, color, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO highlights (id, doc_id, sentence_idx, text, color, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     id,
     docId,
     idx,
     clean,
     c,
     note?.trim().slice(0, 2000) || null,
+    ts,
     ts,
   );
   return {
@@ -539,9 +568,44 @@ export function listHighlights(docId: string): Highlight[] {
 }
 
 export function deleteHighlight(docId: string, id: string): boolean {
-  return (
-    dbRun("DELETE FROM highlights WHERE id = ? AND doc_id = ?", id, docId).changes > 0
+  const changed =
+    dbRun("DELETE FROM highlights WHERE id = ? AND doc_id = ?", id, docId).changes > 0;
+  if (changed) recordTombstone("highlights", id);
+  return changed;
+}
+
+export function updateHighlight(
+  docId: string,
+  id: string,
+  patch: { note?: string | null; color?: unknown },
+): Highlight | null {
+  const existing = dbGet<HighlightRow>(
+    "SELECT * FROM highlights WHERE id = ? AND doc_id = ?",
+    id,
+    docId,
   );
+  if (!existing) return null;
+  const newColor =
+    patch.color !== undefined
+      ? normalizeHighlightColor(patch.color)
+      : existing.color;
+  const newNote =
+    patch.note !== undefined
+      ? patch.note ? patch.note.trim().slice(0, 2000) : null
+      : existing.note;
+  dbRun(
+    "UPDATE highlights SET color = ?, note = ?, updated_at = ? WHERE id = ? AND doc_id = ?",
+    newColor,
+    newNote,
+    nowIso(),
+    id,
+    docId,
+  );
+  return {
+    ...toHighlight(existing),
+    color: newColor as HighlightColor,
+    note: newNote,
+  };
 }
 
 export function createFolder(name: string, color?: string | null): Folder {
@@ -549,7 +613,7 @@ export function createFolder(name: string, color?: string | null): Folder {
   if (!clean) throw new Error("Folder name is required.");
   const id = randomUUID();
   const ts = nowIso();
-  dbRun("INSERT INTO folders (id, name, color, created_at) VALUES (?, ?, ?, ?)", id, clean, color?.trim().slice(0, 32) || null, ts);
+  dbRun("INSERT INTO folders (id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", id, clean, color?.trim().slice(0, 32) || null, ts, ts);
   return { id, name: clean, color: color?.trim() || null, createdAt: ts, documentCount: 0 };
 }
 
@@ -562,8 +626,11 @@ export function listFolders(): Folder[] {
 }
 
 export function deleteFolder(id: string): boolean {
-  dbRun("UPDATE documents SET folder_id = NULL WHERE folder_id = ?", id);
-  return dbRun("DELETE FROM folders WHERE id = ?", id).changes > 0;
+  // Unfiling bumps updated_at so the change propagates over sync.
+  dbRun("UPDATE documents SET folder_id = NULL, updated_at = ? WHERE folder_id = ?", nowIso(), id);
+  const changed = dbRun("DELETE FROM folders WHERE id = ?", id).changes > 0;
+  if (changed) recordTombstone("folders", id);
+  return changed;
 }
 
 export { DEFAULT_VOICE };
@@ -593,11 +660,12 @@ export function importAllData(data: ExportData): { imported: number; skipped: nu
   let skipped = 0;
   if (Array.isArray(data.folders)) {
     const fstmt = getDb().prepare(
-      "INSERT OR IGNORE INTO folders (id, name, color, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO folders (id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     );
     for (const f of data.folders) {
       if (f && typeof f.id === "string" && typeof f.name === "string") {
-        fstmt.run(f.id, f.name.slice(0, 100), f.color || null, f.createdAt || nowIso());
+        const ts = f.createdAt || nowIso();
+        fstmt.run(f.id, f.name.slice(0, 100), f.color || null, ts, ts);
       }
     }
   }
@@ -648,21 +716,23 @@ export function importAllData(data: ExportData): { imported: number; skipped: nu
     });
     if (Array.isArray(doc.bookmarks)) {
       const bstmt = getDb().prepare(
-        "INSERT INTO bookmarks (id, doc_id, sentence_idx, note, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO bookmarks (id, doc_id, sentence_idx, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
       );
       for (const b of doc.bookmarks) {
         if (b && typeof b.id === "string") {
-          bstmt.run(b.id, doc.id, b.sentenceIdx || 0, b.note || null, b.createdAt || ts);
+          const bts = b.createdAt || ts;
+          bstmt.run(b.id, doc.id, b.sentenceIdx || 0, b.note || null, bts, bts);
         }
       }
     }
     if (Array.isArray(doc.highlights)) {
       const hstmt = getDb().prepare(
-        "INSERT OR IGNORE INTO highlights (id, doc_id, sentence_idx, text, color, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO highlights (id, doc_id, sentence_idx, text, color, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       );
       for (const h of doc.highlights) {
         if (h && typeof h.id === "string" && typeof h.text === "string") {
-          hstmt.run(h.id, doc.id, h.sentenceIdx || 0, h.text, normalizeHighlightColor(h.color), h.note || null, h.createdAt || ts);
+          const hts = h.createdAt || ts;
+          hstmt.run(h.id, doc.id, h.sentenceIdx || 0, h.text, normalizeHighlightColor(h.color), h.note || null, hts, hts);
         }
       }
     }

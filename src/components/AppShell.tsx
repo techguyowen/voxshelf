@@ -9,10 +9,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { FloatingMiniPlayer } from "./FloatingMiniPlayer";
 import { Header } from "./Header";
+import { ToastProvider } from "./Toast";
+import { UnlockScreen } from "./UnlockScreen";
+import { api } from "@/lib/client";
 import { ImportModal } from "./ImportModal";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
 import { SettingsModal } from "./SettingsModal";
+import { StatsModal } from "./StatsModal";
 
 interface UIContextValue {
   openImport: () => void;
@@ -23,6 +28,7 @@ interface UIContextValue {
   shortcutsOpen: boolean;
   openShortcuts: () => void;
   closeShortcuts: () => void;
+  openStats: () => void;
 }
 
 const UIContext = createContext<UIContextValue>({
@@ -33,6 +39,7 @@ const UIContext = createContext<UIContextValue>({
   shortcutsOpen: false,
   openShortcuts: () => {},
   closeShortcuts: () => {},
+  openStats: () => {},
 });
 
 export function useUI() {
@@ -50,12 +57,28 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [importOpen, setImportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [settingsRev, setSettingsRev] = useState(0);
+  const [auth, setAuth] = useState<{ locked: boolean; authed: boolean } | null>(null);
+
+  async function refreshAuth() {
+    try {
+      setAuth(await api.authStatus());
+    } catch {
+      // Status endpoint unreachable: render the app and let API calls surface it.
+      setAuth({ locked: false, authed: true });
+    }
+  }
+
+  useEffect(() => {
+    void refreshAuth();
+  }, []);
 
   const openImport = useCallback(() => setImportOpen(true), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
+  const openStats = useCallback(() => setStatsOpen(true), []);
   const bumpSettings = useCallback(
     () => setSettingsRev((r) => r + 1),
     [],
@@ -91,6 +114,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       shortcutsOpen,
       openShortcuts,
       closeShortcuts,
+      openStats,
     }),
     [
       openImport,
@@ -100,10 +124,28 @@ export function AppShell({ children }: { children: ReactNode }) {
       shortcutsOpen,
       openShortcuts,
       closeShortcuts,
+      openStats,
     ],
   );
 
+  if (!auth) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center text-sm text-zinc-500">
+        Loading…
+      </div>
+    );
+  }
+
+  if (auth.locked && !auth.authed) {
+    return (
+      <ToastProvider>
+        <UnlockScreen onUnlock={() => void refreshAuth()} />
+      </ToastProvider>
+    );
+  }
+
   return (
+    <ToastProvider>
     <UIContext.Provider value={value}>
       <Header
         onImport={openImport}
@@ -124,6 +166,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       {shortcutsOpen && (
         <KeyboardShortcutsModal onClose={closeShortcuts} />
       )}
+      {statsOpen && <StatsModal onClose={() => setStatsOpen(false)} />}
+      <FloatingMiniPlayer />
     </UIContext.Provider>
+    </ToastProvider>
   );
 }

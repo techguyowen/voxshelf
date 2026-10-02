@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { cleanupText } from "@/lib/gemini";
 import { apiError, toApiError } from "@/lib/http";
 import { runOcr, type OcrMode } from "@/lib/extract/ocr";
@@ -14,6 +15,8 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024;
  * Optional: mode ("auto"|"local"|"ai"), cleanup ("1"), key.
  */
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const form = await req.formData();
     const file = form.get("file");

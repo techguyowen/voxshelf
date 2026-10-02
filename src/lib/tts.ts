@@ -7,6 +7,10 @@ import {
 } from "./audio";
 import { getCachedAudio, saveCachedAudio } from "./audioCache";
 import { synthesizeSpeech } from "./gemini";
+import {
+  applyPronunciationRules,
+  loadPronunciationRulesCached,
+} from "./pronunciation";
 import { getDefaultVoice } from "./settings";
 import { chunkForTts } from "./text";
 import { isValidVoice } from "./voices";
@@ -34,8 +38,11 @@ export async function synthesizeAndCache(
   stylePrompt?: string,
   explicitKey?: string | null,
 ): Promise<TtsResult> {
-  const clean = text.replace(/\s+/g, " ").trim();
-  if (!clean) throw new Error("Nothing to speak.");
+  const raw = text.replace(/\s+/g, " ").trim();
+  if (!raw) throw new Error("Nothing to speak.");
+  // Pronunciation fixes apply before hashing so rule changes invalidate
+  // stale cached audio and renamed words are what Gemini actually speaks.
+  const clean = applyPronunciationRules(raw, loadPronunciationRulesCached());
   if (clean.length > MAX_CHARS) {
     throw new Error(
       `Text is too long for one request (max ${MAX_CHARS.toLocaleString()} characters).`,

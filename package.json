@@ -1,13 +1,42 @@
 {
-  "name": "vocalflow",
+  "name": "voxshelf",
   "version": "1.0.0",
   "private": true,
-  "description": "VocalFlow - self-hostable text-to-speech app powered by Gemini speech generation",
+  "description": "VoxShelf - self-hostable text-to-speech app powered by Gemini speech generation",
+  "author": "VoxShelf",
+  "desktopName": "app.voxshelf",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "next dev -p 38492",
     "build": "next build",
     "start": "next start -p 38492",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "desktop:dev": "electron .",
+    "desktop:icons": "node scripts/make-icons.mjs",
+    "desktop:build": "node scripts/electron-build.mjs"
+  },
+  "build": {
+    "appId": "app.voxshelf",
+    "productName": "VoxShelf",
+    "directories": { "output": "dist" },
+    "files": ["electron/**/*", ".next/standalone/**/*", "package.json"],
+    "asarUnpack": [".next/standalone/**/*", "**/*.node"],
+    "npmRebuild": false,
+    "mac": {
+      "icon": "electron/assets/icon.icns",
+      "target": ["dmg", "zip"],
+      "category": "public.app-category.music"
+    },
+    "win": {
+      "icon": "electron/assets/icon.ico",
+      "target": ["nsis"]
+    },
+    "linux": {
+      "icon": "electron/assets/icon.png",
+      "target": ["AppImage"],
+      "category": "Audio",
+      "syncDesktopName": true
+    }
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible": "^5.1.0",
@@ -30,6 +59,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
+    "electron": "^44.5.0",
+    "electron-builder": "^26.15.3",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.0.0"

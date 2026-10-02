@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { toApiError } from "@/lib/http";
 import {
   getPublicSettings,
@@ -10,7 +11,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /** GET /api/settings — public settings (never includes the API key). */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     return NextResponse.json(getPublicSettings());
   } catch (err) {
@@ -23,6 +26,8 @@ export async function GET() {
  * ttsModel?, textModel? }. Empty-string geminiApiKey clears the stored key.
  */
 export async function PUT(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const body = (await req.json()) as {
       geminiApiKey?: string;

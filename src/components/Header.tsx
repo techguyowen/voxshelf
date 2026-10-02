@@ -1,9 +1,10 @@
 "use client";
 
-import { AudioLines, Keyboard, Moon, Plus, Settings, Sun } from "lucide-react";
+import { AudioLines, BarChart3, Keyboard, Lock, Moon, Plus, Settings, Sun } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/client";
+import { useUI } from "./AppShell";
 import { useTheme } from "./ThemeContext";
 
 export function Header({
@@ -18,7 +19,9 @@ export function Header({
   settingsRev: number;
 }) {
   const { theme, toggle } = useTheme();
+  const { openStats } = useUI();
   const [hasKey, setHasKey] = useState<boolean | null>(null);
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -30,20 +33,35 @@ export function Header({
       .catch(() => {
         if (live) setHasKey(null);
       });
+    api
+      .authStatus()
+      .then((s) => {
+        if (live) setLocked(s.locked);
+      })
+      .catch(() => {});
     return () => {
       live = false;
     };
   }, [settingsRev]);
 
+  async function lockNow() {
+    try {
+      await api.authLogout();
+    } catch {
+      // Cookie may already be gone; reloading still re-locks the UI.
+    }
+    window.location.reload();
+  }
+
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/90">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center gap-2 px-3 sm:px-6">
-        <Link href="/" className="flex items-center gap-2" aria-label="VocalFlow home">
+        <Link href="/" className="flex items-center gap-2" aria-label="VoxShelf home">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white dark:bg-emerald-500 dark:text-zinc-950">
             <AudioLines size={18} strokeWidth={2.5} />
           </span>
           <span className="text-lg font-bold tracking-tight">
-            VocalFlow
+            VoxShelf
           </span>
         </Link>
 
@@ -85,10 +103,10 @@ export function Header({
           <button
             onClick={toggle}
             className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            title={theme === "dark" ? "Light mode" : "Dark mode"}
+            aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"}
+            title={theme === "light" ? "Dark mode" : "Light mode"}
           >
-            {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
+            {theme === "light" ? <Moon size={19} /> : <Sun size={19} />}
           </button>
 
           <button
@@ -101,6 +119,15 @@ export function Header({
           </button>
 
           <button
+            onClick={openStats}
+            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            aria-label="Reading stats"
+            title="Reading stats"
+          >
+            <BarChart3 size={19} />
+          </button>
+
+          <button
             onClick={onSettings}
             className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
             aria-label="Settings"
@@ -108,6 +135,17 @@ export function Header({
           >
             <Settings size={19} />
           </button>
+
+          {locked && (
+            <button
+              onClick={() => void lockNow()}
+              className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+              aria-label="Lock now"
+              title="Lock now (clears this browser's access)"
+            >
+              <Lock size={19} />
+            </button>
+          )}
 
           <button
             onClick={onImport}

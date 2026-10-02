@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
+import {
+  getEngine,
+  getNowPlaying,
+  getSharedAudio,
+  registerEngine,
+  releaseEngine,
+} from "@/lib/globalPlayer";
 import { offlineAudioUrl } from "@/lib/offlineStore";
 import type { DocumentDetail } from "@/lib/types";
+import { stopVoicePreview } from "@/lib/voicePreview";
+import { applyStoredVolume, loadVolume } from "@/lib/volume";
 
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "error";
 
@@ -48,26 +57,28 @@ function getSentenceWordTimings(text: string): WordTiming[] {
 
   if (words.length === 0) return [];
 
-  // Syllable, number, and punctuation aware weights
+  // Realistic human speech & TTS pacing weights:
+  // Every word requires a minimum articulation time (base 3.5), plus character
+  // length, syllable vowel counts, numbers, and punctuation breath pauses.
   const weights: number[] = words.map((w) => {
     const cleanWord = w.replace(/[^\p{L}\p{N}]/gu, "");
-    let weight = Math.max(1.4, cleanWord.length);
+    let weight = 3.5 + cleanWord.length * 0.85;
 
-    // Vowel count heuristic for syllable length
+    // Syllable / vowel count heuristic
     const vowelCount = (cleanWord.match(/[aeiouyáéíóúäëïöü]/gi) || []).length;
-    weight += vowelCount * 0.4;
+    weight += vowelCount * 1.2;
 
-    // Numbers take longer to speak aloud
-    if (/\d+/.test(cleanWord)) {
-      weight += cleanWord.length * 1.5;
+    // Numbers take longer to speak
+    const digits = (cleanWord.match(/\d/g) || []).length;
+    if (digits > 0) {
+      weight += digits * 2.8;
     }
 
     // Punctuation pauses
-    if (/[,;:]$/.test(w)) weight += 2.2;
-    else if (/[.!?]$/.test(w)) weight += 3.2;
-    else if (/[-—–]$/.test(w)) weight += 1.8;
+    if (/[,;:]$/.test(w) || /[-—–]$/.test(w)) weight += 3.0;
+    else if (/[.!?]["']?$/.test(w)) weight += 4.5;
 
-    return weight;
+    return Math.max(2.5, weight);
   });
 
   const totalWeight = weights.reduce((a, b) => a + b, 0);
@@ -96,9 +107,9 @@ export function computeActiveWordIndex(
   if (timings.length === 0) return -1;
   if (timings.length === 1) return 0;
 
-  // Acoustic lead-in and tail margins
-  const leadIn = Math.min(0.08, duration * 0.03);
-  const tailMargin = Math.min(0.18, duration * 0.05);
+  // Gemini TTS audio clips have ~60-100ms lead-in and ~250-400ms trailing pause
+  const leadIn = Math.min(0.12, Math.max(0.05, duration * 0.04));
+  const tailMargin = Math.min(0.40, Math.max(0.15, duration * 0.08));
   const speechDur = Math.max(0.1, duration - leadIn - tailMargin);
 
   if (currentTime < leadIn) return 0;
@@ -131,6 +142,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const [clipProgress, setClipProgress] = useState(0);
   const [currentWord, setCurrentWord] = useState(-1);
   const [sleepLeft, setSleepLeft] = useState<number | null>(null);
+  const [sleepEndOfDoc, setSleepEndOfDoc] = useState(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const cacheRef = useRef(new Map<string, Clip>());
@@ -312,6 +324,8 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     async (idx: number, autoplay: boolean) => {
       const d = docRef.current;
       if (!d || d.sentences.length === 0) return;
+      // A voice-audition preview must never overlap document audio.
+      stopVoicePreview();
       const clamped = resolveReadable(
         idx,
         idx < currentIdxRef.current ? -1 : 1,
@@ -347,8 +361,11 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
           setStatus("paused");
         }
         reportProgress(clamped);
+        // Pre-buffer the next 3 sentences during playback for zero-latency
+        // sentence transitions (N+1 renders instantly; N+2/N+3 stay warm).
         void ensureAudio(clamped + 1).catch(() => {});
         void ensureAudio(clamped + 2).catch(() => {});
+        void ensureAudio(clamped + 3).catch(() => {});
       } catch (e) {
         if (op !== opRef.current) return;
         setLoadingIdx(null);
@@ -368,6 +385,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   }, [reportProgress]);
 
   const play = useCallback(() => {
+    stopVoicePreview();
     const audio = audioRef.current;
     if (
       audio &&
@@ -398,6 +416,14 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const playFrom = useCallback(
     (idx: number) => {
       void goTo(idx, true);
+    },
+    [goTo],
+  );
+
+  /** Move the cursor without starting playback (TOC jumps while paused). */
+  const seekTo = useCallback(
+    (idx: number) => {
+      void goTo(idx, false);
     },
     [goTo],
   );
@@ -502,18 +528,50 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     if (sleepTickRef.current) clearInterval(sleepTickRef.current);
     sleepTimeoutRef.current = null;
     sleepTickRef.current = null;
+    if (audioRef.current) {
+      try {
+        // Restore the user's chosen volume (not full blast) after a fade.
+        audioRef.current.volume = loadVolume();
+      } catch {
+        // ignore
+      }
+    }
     setSleepLeft(null);
+    setSleepEndOfDoc(false);
   }, []);
 
   const setSleep = useCallback(
-    (minutes: number | null) => {
+    (minutes: number | "end" | null) => {
       clearSleep();
-      if (minutes === null || minutes <= 0) return;
+      if (minutes === null) return;
+      if (minutes === "end") {
+        setSleepEndOfDoc(true);
+        return;
+      }
+      if (minutes <= 0) return;
       const end = Date.now() + minutes * 60_000;
       setSleepLeft(minutes * 60);
+      if (audioRef.current) {
+        try {
+          audioRef.current.volume = loadVolume();
+        } catch {
+          // ignore
+        }
+      }
       sleepTickRef.current = setInterval(() => {
         const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
         setSleepLeft(left);
+        // Gentle linear fade-out over the final 30 seconds, relative to the
+        // user's chosen base volume.
+        const audio = audioRef.current;
+        if (audio) {
+          try {
+            const base = loadVolume();
+            audio.volume = left <= 30 ? Math.max(0, base * (left / 30)) : base;
+          } catch {
+            // ignore
+          }
+        }
         if (left <= 0 && sleepTickRef.current) {
           clearInterval(sleepTickRef.current);
           sleepTickRef.current = null;
@@ -532,25 +590,61 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     setStatus((s) => (s === "error" ? "paused" : s));
   }, []);
 
-  // --- audio element lifecycle ---
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "auto";
-    audioRef.current = audio;
-
-    const onEnded = () => {
-      const d = docRef.current;
-      if (!d) return;
-      const idx = currentIdxRef.current;
-      if (idx < d.sentences.length - 1) {
-        void goTo(idx + 1, true);
-      } else {
-        setStatus("paused");
-        setClipProgress(1);
-        reportProgress(idx);
-        clearSleep();
+  /**
+   * Instantly re-sync visual state from the live audio element. Used when the
+   * tab/screen becomes visible again after background playback (including a
+   * mobile lockscreen wakeup): rAF ticks and timeupdate events are throttled
+   * while hidden, so the karaoke cursor would otherwise lag behind the audio.
+   */
+  const resync = useCallback(() => {
+    const audio = audioRef.current ?? getSharedAudio();
+    if (!audio || !audio.src) return;
+    const dur = audio.duration;
+    if (!Number.isFinite(dur) || dur <= 0) return;
+    const cur = audio.currentTime;
+    setClipProgress(Math.min(1, Math.max(0, cur / dur)));
+    setCurrentWord(
+      computeActiveWordIndex(speakText(currentIdxRef.current), cur, dur),
+    );
+    try {
+      if (
+        "mediaSession" in navigator &&
+        Number.isFinite(audio.currentTime) &&
+        Number.isFinite(audio.duration)
+      ) {
+        navigator.mediaSession.setPositionState({
+          duration: audio.duration,
+          playbackRate: audio.playbackRate,
+          position: Math.min(audio.currentTime, audio.duration),
+        });
       }
-    };
+    } catch {
+      // setPositionState throws when no metadata is set; ignore.
+    }
+  }, [speakText]);
+
+  /** Advance one sentence (delegated from the shared audio `ended` event). */
+  const advance = useCallback(() => {
+    const d = docRef.current;
+    if (!d) return;
+    const idx = currentIdxRef.current;
+    if (idx < d.sentences.length - 1) {
+      void goTo(idx + 1, true);
+    } else {
+      setStatus("paused");
+      setClipProgress(1);
+      reportProgress(idx);
+      clearSleep();
+    }
+  }, [goTo, reportProgress, clearSleep]);
+
+  // --- audio element lifecycle (shared element survives navigation) ---
+  useEffect(() => {
+    const audio = getSharedAudio();
+    if (!audio) return;
+    audioRef.current = audio;
+    applyStoredVolume(audio);
+
     const updateProgress = () => {
       if (!audio) return;
       const dur = audio.duration;
@@ -597,91 +691,142 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       updateProgress();
     };
 
-    audio.addEventListener("ended", onEnded);
     audio.addEventListener("timeupdate", onTimeUpdate);
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      audio.pause();
-      audio.removeEventListener("ended", onEnded);
+      // The shared element keeps playing in the background on unmount so
+      // navigation never interrupts listening; only detach our listeners.
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
       audioRef.current = null;
     };
-  }, [goTo, reportProgress, clearSleep, speakText]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportProgress, clearSleep, speakText]);
 
   // --- reset when the document changes ---
   useEffect(() => {
     if (!doc) return;
     opRef.current += 1;
-    const audio = audioRef.current;
-    if (audio) {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
+    const audio = audioRef.current ?? getSharedAudio();
+    // Reopening the doc that is already playing in the background:
+    // reattach to its transport instead of stopping it.
+    const bgEngine = getEngine();
+    const bgMeta = getNowPlaying();
+    const reattaching =
+      !!audio &&
+      audio.src !== "" &&
+      bgEngine?.docId === doc.id &&
+      bgMeta?.docId === doc.id;
+    if (reattaching && audio) {
+      setStatus(audio.paused ? "paused" : "playing");
+      setError(null);
+      setLoadingIdx(null);
+      setCurrentIdx(
+        Math.max(0, Math.min(doc.sentenceCount - 1, bgMeta?.sentenceIdx ?? doc.progressSentenceIndex)),
+      );
+      setSpeedState(clampSpeed(bgMeta?.speed ?? doc.speed));
+      setVoiceState(doc.voice);
+      setStylePromptState(doc.stylePrompt || "");
+      setClipProgress(bgMeta?.clipProgress ?? 0);
+      setCurrentWord(-1);
+    } else {
+      if (audio) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+        applyStoredVolume(audio);
+      }
+      setStatus("idle");
+      setError(null);
+      setLoadingIdx(null);
+      setCurrentIdx(Math.max(0, Math.min(doc.sentenceCount - 1, doc.progressSentenceIndex)));
+      setSpeedState(clampSpeed(doc.speed));
+      setVoiceState(doc.voice);
+      setStylePromptState(doc.stylePrompt || "");
+      setClipProgress(0);
+      setCurrentWord(-1);
     }
-    setStatus("idle");
-    setError(null);
-    setLoadingIdx(null);
-    setCurrentIdx(Math.max(0, Math.min(doc.sentenceCount - 1, doc.progressSentenceIndex)));
-    setSpeedState(clampSpeed(doc.speed));
-    setVoiceState(doc.voice);
-    setStylePromptState(doc.stylePrompt || "");
-    setClipProgress(0);
-    setCurrentWord(-1);
     clearSleep();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc?.id]);
 
-  // --- MediaSession: lock-screen metadata + background controls ---
-  const actionsRef = useRef({ play, pause, toggle, next, prev, skip });
-  actionsRef.current = { play, pause, toggle, next, prev, skip };
+  // --- Global engine: mini-player + lock-screen controls delegate here. ---
+  const engineActionsRef = useRef({
+    play,
+    pause,
+    toggle,
+    next,
+    prev,
+    skip,
+    setSpeed,
+    advance,
+  });
+  engineActionsRef.current = {
+    play,
+    pause,
+    toggle,
+    next,
+    prev,
+    skip,
+    setSpeed,
+    advance,
+  };
 
   useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
-    try {
-      navigator.mediaSession.setActionHandler("play", () => actionsRef.current.play());
-      navigator.mediaSession.setActionHandler("pause", () => actionsRef.current.pause());
-      navigator.mediaSession.setActionHandler("previoustrack", () => actionsRef.current.prev());
-      navigator.mediaSession.setActionHandler("nexttrack", () => actionsRef.current.next());
-      navigator.mediaSession.setActionHandler("seekbackward", (details) => {
-        void actionsRef.current.skip(-(details.seekOffset ?? 15));
-      });
-      navigator.mediaSession.setActionHandler("seekforward", (details) => {
-        void actionsRef.current.skip(details.seekOffset ?? 15);
-      });
-    } catch {
-      // Unsupported actions on this platform.
-    }
+    if (!doc) return;
+    registerEngine(doc.id, {
+      play: () => engineActionsRef.current.play(),
+      pause: () => engineActionsRef.current.pause(),
+      toggle: () => engineActionsRef.current.toggle(),
+      next: () => engineActionsRef.current.next(),
+      prev: () => engineActionsRef.current.prev(),
+      skip: (s: number) => {
+        void engineActionsRef.current.skip(s);
+      },
+      setSpeed: (v: number) => engineActionsRef.current.setSpeed(v),
+      advance: () => engineActionsRef.current.advance(),
+    });
     return () => {
-      try {
-        navigator.mediaSession.setActionHandler("play", null);
-        navigator.mediaSession.setActionHandler("pause", null);
-        navigator.mediaSession.setActionHandler("previoustrack", null);
-        navigator.mediaSession.setActionHandler("nexttrack", null);
-        navigator.mediaSession.setActionHandler("seekbackward", null);
-        navigator.mediaSession.setActionHandler("seekforward", null);
-      } catch {
-        // ignore
-      }
+      releaseEngine(doc.id);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id]);
 
   useEffect(() => {
     if (!("mediaSession" in navigator) || !doc) return;
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: doc.title,
-        artist: "VocalFlow",
+        artist: "VoxShelf",
         album: `Sentence ${currentIdx + 1} of ${doc.sentenceCount}`,
       });
     } catch {
       // ignore
     }
   }, [doc, currentIdx]);
+
+  // --- Background tab resync & mobile lockscreen wakeup ---
+  // While hidden, rAF/timeupdate callbacks are throttled, so the karaoke
+  // cursor lags behind the audio. The moment the tab/screen is visible
+  // again, re-sync clip progress + the active word from the live element.
+  const resyncRef = useRef(resync);
+  resyncRef.current = resync;
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") resyncRef.current();
+    };
+    const onFocus = () => resyncRef.current();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
 
   return {
     status,
@@ -694,10 +839,12 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     clipProgress,
     currentWord,
     sleepLeft,
+    sleepEndOfDoc,
     play,
     pause,
     toggle,
     playFrom,
+    seekTo,
     next,
     prev,
     skip,
@@ -706,6 +853,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     setStylePrompt,
     setSleep,
     dismissError,
+    resync,
   };
 }
 

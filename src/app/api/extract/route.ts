@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/auth";
 import { cleanupText } from "@/lib/gemini";
 import { apiError, toApiError } from "@/lib/http";
 import { countWords, splitSentences } from "@/lib/text";
@@ -29,6 +30,8 @@ function extOf(name: string): string {
  * Returns extracted { title, author, text, ... } without saving.
  */
 export async function POST(req: NextRequest) {
+  const denied = requireAuth(req);
+  if (denied) return denied;
   try {
     const form = await req.formData();
     const key = asString(form.get("key")) || undefined;
