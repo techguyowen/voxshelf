@@ -1,6 +1,6 @@
 # Desktop apps (macOS, Windows, Linux)
 
-Native installers ship from every [GitHub release](https://github.com/voxshelf/voxshelf/releases):
+Native installers ship from every [GitHub release](https://github.com/techguyowen/voxshelf/releases):
 
 | OS | File | Notes |
 | --- | --- | --- |

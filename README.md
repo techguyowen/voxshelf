@@ -14,7 +14,7 @@
 [![Gemini Text](https://img.shields.io/badge/Gemini-3.8_Text-8E75B2?logo=google&logoColor=white)](https://aistudio.google.com/)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald)](LICENSE)
-[![CI](https://github.com/voxshelf/voxshelf/actions/workflows/ci.yml/badge.svg)](https://github.com/voxshelf/voxshelf/actions/workflows/ci.yml)
+[![CI](https://github.com/techguyowen/voxshelf/actions/workflows/ci.yml/badge.svg)](https://github.com/techguyowen/voxshelf/actions/workflows/ci.yml)
 
 ---
 
@@ -107,7 +107,7 @@ docs/
 Prerequisites: Node.js 20+ (22+ recommended).
 
 ```bash
-git clone https://github.com/voxshelf/voxshelf.git
+git clone https://github.com/techguyowen/voxshelf.git
 cd voxshelf
 npm install
 cp .env.example .env   # then add your GEMINI_API_KEY
@@ -178,7 +178,7 @@ behind an unlock screen (empty = open, fine on a trusted LAN).
 ## 🖥️ Desktop apps & sync
 
 Native **macOS, Windows, and Linux** apps ship from every
-[GitHub release](https://github.com/voxshelf/voxshelf/releases).
+[GitHub release](https://github.com/techguyowen/voxshelf/releases).
 Each app embeds the full server with a local SQLite library, so it works
 offline — and it can two-way sync with your Docker server (or another
 device) via **Settings → Library sync**.

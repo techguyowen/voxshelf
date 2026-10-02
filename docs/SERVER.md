@@ -4,7 +4,7 @@ The server image is published to GHCR on every `main` push and `v*` tag,
 for `linux/amd64` and `linux/arm64`:
 
 ```bash
-docker pull ghcr.io/voxshelf/voxshelf:latest
+docker pull ghcr.io/techguyowen/voxshelf:latest
 docker run -d --name voxshelf --restart unless-stopped \
   -p 38492:38492 \
   -e GEMINI_API_KEY=AIza… \
