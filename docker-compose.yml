@@ -1,34 +1,19 @@
 services:
   voxshelf:
-    # Use prebuilt container image or build locally with 'build: .'
     image: ghcr.io/techguyowen/voxshelf:latest
-    build:
-      context: .
-      dockerfile: Dockerfile
     container_name: voxshelf
     restart: unless-stopped
     ports:
       - "38492:38492"
-    environment:
-      # Port for the web interface and API
-      - PORT=38492
-      # Your Google Gemini API Key (get free at https://aistudio.google.com/apikey)
-      # Can also be left blank and entered later via in-app Settings
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      # Speech synthesis model: 'gemini-3.1-flash-tts-preview' or 'gemini-3.8-flash-tts-preview'
-      - GEMINI_TTS_MODEL=${GEMINI_TTS_MODEL:-gemini-3.1-flash-tts-preview}
-      # Text model for summaries, OCR, Q&A, and quizzes: 'gemini-3.8-flash'
-      - GEMINI_TEXT_MODEL=${GEMINI_TEXT_MODEL:-gemini-3.8-flash}
-      # Optional: set a password to protect your server (leave empty for open LAN)
-      - API_KEY=${API_KEY:-}
-      # Internal data directory path
-      - DATA_DIR=/app/data
     volumes:
-      # Persistent storage for SQLite database (voxshelf.db) and audio clip cache
+      # Persistent storage for SQLite database (voxshelf.db) and audio cache
       - ./data:/app/data
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:38492/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+    environment:
+      - PORT=38492
+      # Optional: You can enter your Gemini API key and select TTS/Text models
+      # directly in the web UI (Settings gear icon).
+      # If preferred, you can also pass them via environment variables below:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      # - GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview # or gemini-3.8-flash-tts-preview
+      # - GEMINI_TEXT_MODEL=gemini-3.8-flash
+      # - API_KEY=optional_server_password # password lock for public servers

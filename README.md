@@ -128,31 +128,26 @@ Save the following as `docker-compose.yml` (or use the one included in this repo
 services:
   voxshelf:
     image: ghcr.io/techguyowen/voxshelf:latest
-    # Or build locally:
-    # build: .
     container_name: voxshelf
     restart: unless-stopped
     ports:
       - "38492:38492"
-    environment:
-      - PORT=38492
-      - GEMINI_API_KEY=${GEMINI_API_KEY} # get free key: https://aistudio.google.com/apikey
-      - GEMINI_TTS_MODEL=gemini-3.1-flash-tts-preview # or gemini-3.8-flash-tts-preview
-      - GEMINI_TEXT_MODEL=gemini-3.8-flash
-      - API_KEY=${API_KEY:-} # optional: password to protect your instance
-      - DATA_DIR=/app/data
     volumes:
       - ./data:/app/data
+    environment:
+      - PORT=38492
+      # Optional: You can also paste your Gemini API key and pick models
+      # directly in the web UI (Settings gear icon).
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
 ```
 
 Start the container:
 
 ```bash
-export GEMINI_API_KEY=AIza…   # or place in a .env file
 docker compose up -d
 ```
 
-Open [http://localhost:38492](http://localhost:38492) in your browser. All documents, audio cache, and settings are saved in `./data`.
+Open [http://localhost:38492](http://localhost:38492) in your browser. All documents, audio cache, and settings (including API keys entered via UI) persist in `./data`.
 
 To update to the latest image:
 
