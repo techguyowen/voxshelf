@@ -1,9 +1,9 @@
 # 🎧 VoxShelf — Listen to Anything
 
-> A **self-hostable, mobile-first text-to-speech reader** powered by **Gemini
-> speech generation**. Import PDFs, EPUBs, Word docs, web articles, Google Docs,
-> photos of pages, or pasted text — then listen with karaoke-style
-> highlighting, lock-screen controls, and an AI reading assistant.
+> A **vibecoded, self-hostable, mobile-first text-to-speech reader** powered by **Gemini
+> speech generation** — built as an open, privacy-first alternative to expensive commercial subscriptions.
+> Import PDFs, EPUBs, Word docs, web articles, Google Docs, photos of pages, or pasted text, then
+> listen with karaoke-style highlighting, dyslexia-friendly typography, lock-screen controls, and an AI reading assistant.
 
 [![Next.js 15](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
@@ -15,6 +15,23 @@
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald)](LICENSE)
 [![CI](https://github.com/techguyowen/voxshelf/actions/workflows/ci.yml/badge.svg)](https://github.com/techguyowen/voxshelf/actions/workflows/ci.yml)
+
+---
+
+## 💡 Why I Built VoxShelf (The Story)
+
+VoxShelf is a **vibecoded, open-source passion project** born out of real personal necessity.
+
+Throughout high school and college, I relied heavily on text-to-speech readers and visual focus tools to digest massive volumes of technical reading, documentation, textbooks, and research papers. As someone navigating learning differences like dyslexia, having words read aloud with synchronous visual tracking made all the difference between struggling through dense paragraphs and actually absorbing the material.
+
+Commercial TTS apps and reading tools charge **\$100 to \$250+ every year** — locking essential accessibility and learning tools behind aggressive paywalls, subscription fatigue, and restrictive monthly character caps.
+
+VoxShelf was created to change that:
+- **Free & Self-Hostable:** Run it on your local laptop, desktop, home server, Docker, or Raspberry Pi.
+- **Pennies (or Free) with Gemini:** Powered by Google's Gemini API, you get ultra-natural voices (Gemini 3.1 Flash TTS), document understanding, summarization, quizzes, and podcast generation using your own API key — virtually free under standard free-tier limits or pennies per month under paid API usage.
+- **Built for Real Readers & Thinkers:** OpenDyslexic typography, bionic reading fixation mode, focus rulers, word-by-word karaoke highlighting, multi-device sync, and full offline mode.
+
+No subscriptions. No artificial paywalls. Just a fast, beautifully crafted reader that works for you.
 
 ---
 
