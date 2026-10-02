@@ -1,9 +1,7 @@
-# 🎧 VoxShelf — Listen to Anything
+# VoxShelf
 
-> A **vibecoded, self-hostable, mobile-first text-to-speech reader** powered by **Gemini
-> speech generation** — built as an open, privacy-first alternative to expensive commercial subscriptions.
-> Import PDFs, EPUBs, Word docs, web articles, Google Docs, photos of pages, or pasted text, then
-> listen with karaoke-style highlighting, dyslexia-friendly typography, lock-screen controls, and an AI reading assistant.
+> A self-hostable, mobile-ready text-to-speech reader powered by Gemini speech generation — built as an open, private alternative to expensive reading subscriptions.
+> Import PDFs, EPUBs, Word documents, web articles, Google Docs, book photos, or raw text, then listen with karaoke-style highlighting, dyslexia-friendly typography, lock-screen controls, and an AI reading assistant.
 
 [![Next.js 15](https://img.shields.io/badge/Next.js-15-black?logo=next.js)](https://nextjs.org/)
 [![React 19](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
@@ -18,165 +16,123 @@
 
 ---
 
-## 💡 Why I Built VoxShelf (The Story)
+## Why I Built VoxShelf
 
-VoxShelf is a **vibecoded, open-source passion project** born out of real personal necessity.
+VoxShelf is an open-source project I vibecoded out of genuine personal need.
 
-Throughout high school and college, I relied heavily on text-to-speech readers and visual focus tools to digest massive volumes of technical reading, documentation, textbooks, and research papers. As someone navigating learning differences like dyslexia, having words read aloud with synchronous visual tracking made all the difference between struggling through dense paragraphs and actually absorbing the material.
+Throughout high school and college, I relied heavily on text-to-speech tools to get through mountains of technical documentation, textbooks, research papers, and class assignments. Having dyslexia, listening along while words highlight in sync was often the only way I could stay focused and actually absorb dense material without rereading the same paragraph five times.
 
-Commercial TTS apps and reading tools charge **\$100 to \$250+ every year** — locking essential accessibility and learning tools behind aggressive paywalls, subscription fatigue, and restrictive monthly character caps.
+Commercial reading apps charge $100 to $250+ every single year for this. That felt unreasonable for something that is essentially an accessibility necessity, especially when you run into arbitrary monthly character caps, subscription fatigue, or locked-down ecosystems.
 
-VoxShelf was created to change that:
-- **Free & Self-Hostable:** Run it on your local laptop, desktop, home server, Docker, or Raspberry Pi.
-- **Pennies (or Free) with Gemini:** Powered by Google's Gemini API, you get ultra-natural voices (choose between **Gemini 3.1 Flash TTS** or **Gemini 3.8 Flash TTS**), document understanding, summarization, quizzes, and podcast generation using your own API key — virtually free under standard free-tier limits or pennies per month under paid API usage.
-- **Built for Real Readers & Thinkers:** OpenDyslexic typography, bionic reading fixation mode, focus rulers, word-by-word karaoke highlighting, multi-device sync, and full offline mode.
+VoxShelf is designed to solve that:
+- **Self-hostable & private:** Run it locally on your laptop, home server, NAS (Unraid, TrueNAS, Synology), or Raspberry Pi.
+- **Pennies (or free) with Gemini:** Using your own Gemini API key, speech synthesis with Gemini 3.1 Flash TTS or 3.8 Flash TTS costs pennies a month (or stays entirely within Google's free tier).
+- **Built for actual reading:** OpenDyslexic typography, bionic reading fixation, focus rulers, word-by-word karaoke tracking, multi-device sync, and full offline support.
 
-No subscriptions. No artificial paywalls. Just a fast, beautifully crafted reader that works for you.
+No subscriptions, no artificial paywalls, and no telemetry. Just a fast, reliable reader that gets out of your way.
 
 ---
 
-## ✨ Features
+## Features
 
-### 🔊 Listening
+### Listening & Speech
 
-- 🎙️ **30 Gemini voices across Gemini 3.1 & 3.8 Flash TTS** (Zephyr, Puck, Charon, Kore, Fenrir, … Sulafat) with
-  tone badges and adjustable style prompts (“warm bedtime-story voice”).
-- ⚡ **0.5×–4.5× speed** with a slider plus one-tap quick pills
-  (`0.75x 1.0x 1.25x 1.5x 1.75x 2.0x 2.5x`).
-- 🎛️ **Zero-latency engine**: the next 3 sentences pre-buffer during playback
-  so narration never pauses between sentences.
-- ⏮️ **±15s skip**, sentence prev/next, sleep timer (5–60 min or end of
-  document), full-document WAV download.
-- 📱 **Background & lock-screen playback** via the MediaSession API — keeps
-  playing with the screen off, with transport controls on the lock screen.
+- **30 Gemini voices:** Zephyr, Puck, Charon, Kore, Fenrir, Aoede, and more, complete with tone indicators and custom style prompts (e.g. "warm conversational tone" or "calm audiobook narrator").
+- **Gemini 3.1 and 3.8 Flash TTS support:** Switch between models dynamically in settings or via environment variables.
+- **0.5x to 4.5x playback speed:** Fine-grained slider adjustment plus quick-access preset pills (`0.75x`, `1.0x`, `1.25x`, `1.5x`, `1.75x`, `2.0x`, `2.5x`).
+- **Zero-latency playback pipeline:** Automatically pre-buffers upcoming sentences so narration flows continuously without pauses between lines.
+- **Navigation controls:** ±15-second skip, previous/next sentence jump, sleep timer (5 to 60 minutes or end of document), and single-file WAV audio export.
+- **Background & lock-screen playback:** Uses the MediaSession API to keep audio playing with the screen locked, with full transport controls on your mobile lock screen or smartwatch.
 
-### 📖 Karaoke reader
+### Karaoke Reader
 
-- 🟡 **Word-level karaoke tracking** with a glowing active sentence and your
-  choice of 6 cursor colors.
-- 📜 **Non-fighting auto-scroll** — manual scrolling pauses follow mode for
-  4 seconds, then resumes.
-- 👆 **Swipe gestures**: swipe left/right on the article to step sentences.
-- 🔦 **Reading ruler / focus-line mode** that dims surrounding text, plus a
-  focus mask and bionic-reading fixation view.
-- 🔤 **Dyslexia-friendly typography**: OpenDyslexic-first stack with Atkinson
-  Hyperlegible fallback, plus Sans/Serif/Mono, adjustable size and line height.
-- 🖍️ **Highlights & notes**: select any passage, pick a color, attach a note;
-  copy everything with surrounding context or export to Markdown.
-- 🔖 **Bookmarks**, per-sentence click-to-play, timeline scrubber with hover
-  previews and time-left estimates.
+- **Word-level karaoke tracking:** Synchronized active sentence highlighting with 6 customizable cursor themes.
+- **Smooth auto-scroll:** Automatically scrolls with playback. Manual scrolling pauses follow-mode for 4 seconds so you can browse freely without being yanked back.
+- **Gesture navigation:** Swipe left or right across the screen to step between sentences.
+- **Reading focus modes:** Focus ruler to dim surrounding lines, focus mask, and bionic-reading fixation mode.
+- **Accessible typography:** OpenDyslexic font stack, Atkinson Hyperlegible fallback, clean modern Sans/Serif/Mono choices, with adjustable font size and line spacing.
+- **Highlights & notes:** Select any text passage to highlight in color, add notes, and export your annotations directly to Markdown.
+- **Interactive timeline:** Bookmarks, sentence-level tap-to-play, scrub bar with hover previews, and remaining listening time estimates.
 
-### 🤖 AI assistant
+### AI Reading Assistant
 
-- 📝 **One-click summaries** (short/detailed, map-reduce so full books work).
-- 💡 **Instant explainer** for any selected text, with surrounding sentences
-  as context.
-- 💬 **In-context document chat**: multi-turn Q&A grounded in the document,
-  with suggested prompts and 1-click spoken answers.
-- 🧠 **Quiz & flashcards**: AI-generated multiple-choice quizzes with live
-  scoring plus 3D flip-cards for active recall.
-- 🎙️ **Multi-voice podcast generator**: turns any document into a lively
-  2-host episode (Alex & Sam) stitched into one audio file.
-- 🎤 **Voice dictation & AI cleanup**: live microphone speech-to-text with
-  filler-word removal and punctuation formatting.
+- **Document summaries:** Quick bullet summaries or detailed multi-section overviews (powered by map-reduce for long books).
+- **Instant explainer:** Highlight any difficult sentence or jargon to get a grounded explanation based on the surrounding context.
+- **Interactive document chat:** Ask questions directly about the material with answers cited from document passages.
+- **Quizzes & flashcards:** Automatically generated multiple-choice comprehension quizzes and 3D flip-cards for active recall.
+- **Multi-speaker podcast generator:** Turn documents into conversational 2-host audio episodes (Alex & Sam) stitched into a single downloadable audio file.
+- **Dictation & cleanup:** Live voice dictation that uses AI to remove filler words and clean up grammar.
 
-### 📚 Library & storage
+### Library & Organization
 
-- 🗂️ **Folders, tags, search, sort, archive**, grid/list views, per-document
-  export (TXT/MD), reading-progress badges.
-- 💾 **SQLite persistence** for documents, sentences, progress, bookmarks,
-  highlights, podcasts, pronunciations, settings, and the audio-cache index.
-- 🔁 **Disk audio cache**: every sentence is synthesized once (content-hashed
-  by text + voice + style) and reused forever — re-listening is free.
-- 📴 **True offline mode**: download books to the device; reading, listening,
-  and the library keep working with no network.
-- 🔊 **Pronunciation dictionary**: fix how names and tricky words are spoken
-  everywhere.
-- 📊 **Reading stats**: streaks, words read, listening history.
+- **Flexible organization:** Folders, tags, full-text search, sorting options, and grid/list view toggles.
+- **Persistent SQLite storage:** Saves documents, sentences, progress cursors, bookmarks, notes, pronunciations, and audio index.
+- **Content-addressed disk cache:** Sentences are hashed by text, voice, and style parameters. Re-listening to already generated text is instantaneous and consumes zero API calls.
+- **Offline mode:** Download documents to your device for completely network-free reading and listening via client-side indexed storage.
+- **Pronunciation dictionary:** Set custom phonetic substitutions for unusual acronyms, technical terms, and proper nouns.
+- **Reading statistics:** Track listening streaks, total words digested, and historical reading sessions.
 
-### 📲 Mobile-first & PWA
+### Mobile-Ready & PWA
 
-- 👆 **44×44px thumb-friendly tap targets** throughout the player, library,
-  and reader.
-- 📳 Haptic feedback on transport controls, safe-area insets for notched
-  phones, installable PWA with offline service worker and app shortcuts.
+- **Touch-optimized:** 44px minimum tap targets across all player controls, dialogs, and reader actions.
+- **Native mobile ergonomics:** Haptic feedback on controls, safe-area inset padding for notched phones, and full PWA installation support.
 
-## 🖼️ Screenshots (what you’ll see)
+---
 
-> Drop real screenshots into `docs/screenshots/` and link them here. Suggested
-> layout:
+## Screenshots
 
-| Library | Karaoke reader | AI assistant |
+| Library | Karaoke Reader | AI Assistant |
 | ------- | -------------- | ------------ |
-| Header with the VoxShelf mark, green “API ready” pill, theme toggle, settings gear and Import button; document cards with source badges (PDF, EPUB, Article, Scan…), word counts, tag chips, emerald progress bars and Resume/Export/Archive/Delete actions; search, sort, tag filters and grid/list toggle above. | The active sentence glows amber with the current word highlighted, neighbors dimmed in ruler mode; font panel (Sans/Serif/Mono/Dyslexia-friendly, size, line height); floating bottom player with animated equalizer, transport controls, speed pills, 30-voice selector with tone badge, style prompt, sleep timer and audio download. | Bottom sheet (mobile) / side drawer (desktop) with Summary / Explain / Chat / Quiz / Cards / Podcast / Saved / Highlights tabs; 3D flip flashcards; podcast player with per-speaker transcript. |
+| Document shelf with format badges (PDF, EPUB, Article, Scan), reading progress indicators, folder organization, search, and sorting. | Sentence-by-sentence karaoke highlighting with dimmed focus ruler, custom font controls, and sticky floating bottom player. | Context drawer with summaries, explainers, document Q&A, active-recall quizzes, and 2-host podcast generator. |
 
-```
-docs/
-  screenshots/
-    library.png    # grid of document cards + folder pills
-    reader.png     # karaoke highlight + player bar
-    ai-drawer.png  # assistant sheet with tabs
-    mobile.png     # phone frame: bottom sheet + equalizer
-```
+---
 
-## 🚀 Quick start (local)
+## Getting Started
 
-Prerequisites: Node.js 20+ (22+ recommended).
+### Local Development
+
+Prerequisites: Node.js 20+ (Node 22 recommended).
 
 ```bash
 git clone https://github.com/techguyowen/voxshelf.git
 cd voxshelf
 npm install
-cp .env.example .env   # then add your GEMINI_API_KEY
+cp .env.example .env   # add your GEMINI_API_KEY
 npm run dev
 ```
 
-Open [http://localhost:38492](http://localhost:38492). On first run a `./data`
-directory is created holding `voxshelf.db` (SQLite) and the `audio/` cache.
+Open [http://localhost:38492](http://localhost:38492) in your browser.
 
-Get a free Gemini API key at <https://aistudio.google.com/apikey> and either
-set `GEMINI_API_KEY` in `.env` or paste it into **Settings** in the app (the
-in-app key overrides the environment variable).
+Get a free Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey). You can place it in your `.env` file or enter it directly into the in-app Settings modal.
 
-Production build:
+To build and run for production:
 
 ```bash
 npm run build
 npm start
 ```
 
-## 🐳 Quick start (Docker)
+---
+
+## Docker Setup
+
+### Docker Compose
 
 ```bash
-export GEMINI_API_KEY=AIza…   # or create a .env file with it
+export GEMINI_API_KEY=AIza…   # or place in a .env file
 docker compose up --build -d
 ```
 
-Then open [http://localhost:38492](http://localhost:38492). Library data and
-the audio cache persist in the local `./data` volume. To update:
+Open [http://localhost:38492](http://localhost:38492). Library data and audio cache are persisted to the local `./data` folder.
+
+To update:
 
 ```bash
-docker compose pull   # if using a published image
+docker compose pull
 docker compose up --build -d
 ```
 
-The Compose file maps container port `38492` to host port `38492`:
-
-```yaml
-services:
-  voxshelf:
-    build: .
-    ports:
-      - "38492:38492"
-    environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - DATA_DIR=/app/data
-    volumes:
-      - ./data:/app/data
-    restart: unless-stopped
-```
-
-Plain `docker run` equivalent:
+### Plain Docker Run
 
 ```bash
 docker build -t voxshelf:latest .
@@ -187,189 +143,129 @@ docker run -d --name voxshelf --restart unless-stopped \
   voxshelf:latest
 ```
 
-Prebuilt multi-arch images (`linux/amd64` + `linux/arm64`) publish to GHCR
-on every release — see [docs/SERVER.md](docs/SERVER.md) for run, update,
-backup/restore, and safe-exposure guides. Set `API_KEY` to lock the server
-behind an unlock screen (empty = open, fine on a trusted LAN).
+---
 
-## 🖥️ Desktop apps & sync
+## Desktop Apps & Sync
 
-Native **macOS, Windows, and Linux** apps ship from every
-[GitHub release](https://github.com/techguyowen/voxshelf/releases).
-Each app embeds the full server with a local SQLite library, so it works
-offline — and it can two-way sync with your Docker server (or another
-device) via **Settings → Library sync**.
+Native installers for **macOS, Windows, and Linux** are available under [Releases](https://github.com/techguyowen/voxshelf/releases).
 
-### Install
+Each desktop app embeds the full reader and local database for offline use, and can two-way sync with your central Docker server or other devices via **Settings → Library sync**.
 
-| OS | Download | Steps |
-| --- | --- | --- |
-| macOS (Apple Silicon) | `VoxShelf-*-arm64.dmg` | Open the DMG, drag to Applications. First launch: right-click → Open → Open (builds are unsigned). |
-| macOS (Intel) | `VoxShelf-*.dmg` (no `arm64` in the name) | Same as above. |
-| Windows 10+ | `VoxShelf Setup *.exe` | Run the installer. If SmartScreen warns: More info → Run anyway. |
-| Linux | `VoxShelf-*.AppImage` | `chmod +x VoxShelf-*.AppImage`, then run it. No install needed. |
+### Installation
 
-### First run
+| Operating System | File | Notes |
+| ---------------- | ---- | ----- |
+| macOS (Apple Silicon) | `VoxShelf-*-arm64.dmg` | Open DMG, drag to Applications. First launch: right-click → Open. |
+| macOS (Intel) | `VoxShelf-*.dmg` | Open DMG, drag to Applications. |
+| Windows 10/11 | `VoxShelf Setup *.exe` | Run installer. If SmartScreen appears: More info → Run anyway. |
+| Linux | `VoxShelf-*.AppImage` | Make executable (`chmod +x`) and launch. |
 
-1. Open VoxShelf and go to **Settings**.
-2. Add your Gemini API key ([free](https://aistudio.google.com/apikey)) — TTS and AI features need it.
-3. (Optional) To sync with a home server, enter its URL under **Settings → Library sync** (e.g. `http://192.168.1.10:38492`) and save. The first sync runs immediately, then about once a minute.
+### Syncing Devices
 
-### What syncs
+1. Open VoxShelf on your desktop or secondary device and go to **Settings**.
+2. Under **Library sync**, enter the URL of your primary instance (e.g. `http://192.168.1.50:38492`) and save.
+3. Sync runs immediately and then periodically in the background (last-write-wins resolution). Details in [docs/SYNC.md](docs/SYNC.md).
 
-- Syncs documents, reading progress, bookmarks, highlights, folders,
-  podcast scripts, settings, pronunciation rules, and reading stats.
-- Last-write-wins conflicts, delete propagation, background + on-demand
-  cycles — details in [docs/SYNC.md](docs/SYNC.md).
-- Audio cache and API keys stay per-device; sync is plain HTTP, so keep it
-  on a trusted LAN/VPN.
+---
 
-### Data locations
+## Self-Hosting Guides
 
-| OS | Library (SQLite + audio cache) |
-| --- | --- |
-| macOS | `~/Library/Application Support/VoxShelf/voxshelf-data/` |
-| Windows | `%APPDATA%\VoxShelf\voxshelf-data\` |
-| Linux | `~/.config/VoxShelf/voxshelf-data/` |
-
-Back up that folder to back up everything (**Help → Open data folder**
-jumps there). Full detail: [docs/DESKTOP.md](docs/DESKTOP.md),
-[docs/SERVER.md](docs/SERVER.md).
-
-## 🏠 Self-hosting guides
-
-All guides assume the app listens on port `38492` internally.
+All guides assume internal port `38492`.
 
 ### Unraid
 
-1. Open the **Docker** tab → **Add Container**.
-2. Set **Repository** to your VoxShelf image (or build from this repo), and
-   add a port mapping `38492` → `38492` (TCP).
-3. Add a path mapping: container `/app/data` → host
-   `/mnt/user/appdata/voxshelf`.
-4. Add a variable `GEMINI_API_KEY` with your key.
-5. Click **Apply**, then open `http://<unraid-ip>:38492`.
+1. Open the **Docker** tab and select **Add Container**.
+2. Set **Repository** to `techguyowen/voxshelf:latest` (or build locally).
+3. Set port mapping `38492` → `38492` (TCP).
+4. Map container path `/app/data` to host path `/mnt/user/appdata/voxshelf`.
+5. Add variable `GEMINI_API_KEY` with your API key.
+6. Click **Apply** and access via `http://<unraid-ip>:38492`.
 
 ### TrueNAS SCALE
 
-1. Go to **Apps** → **Discover** → **Custom App** (or use the Docker Compose
-   custom-app support) and paste the contents of `docker-compose.yml`.
-2. Change the volume to a dataset path, e.g.
-   `/mnt/tank/apps/voxshelf:/app/data`.
-3. Set `GEMINI_API_KEY` in the environment section and expose port `38492`.
-4. Deploy and open `http://<truenas-ip>:38492`.
+1. Navigate to **Apps** → **Discover** → **Custom App** and use the `docker-compose.yml` template.
+2. Map `/app/data` to a storage dataset (e.g. `/mnt/tank/apps/voxshelf:/app/data`).
+3. Set `GEMINI_API_KEY` in environment variables and expose port `38492`.
+4. Deploy and navigate to `http://<truenas-ip>:38492`.
 
 ### Synology DSM
 
-1. Open **Container Manager** → **Project** → **Create**, and paste the
-   `docker-compose.yml` contents.
-2. Set the volume path to a folder on your volume, e.g.
-   `/volume1/docker/voxshelf:/app/data`.
-3. Add `GEMINI_API_KEY` under environment variables.
-4. Build/start the project, then open `http://<nas-ip>:38492`. For HTTPS,
-   put it behind a DSM reverse proxy (Control Panel → Login Portal →
-   Advanced) with a free Let’s Encrypt certificate.
+1. Open **Container Manager** → **Project** → **Create**, and paste the contents of `docker-compose.yml`.
+2. Map `/app/data` to a folder on your volume (e.g. `/volume1/docker/voxshelf:/app/data`).
+3. Set `GEMINI_API_KEY` in environment variables.
+4. Launch the project and browse to `http://<nas-ip>:38492`.
 
-### Railway
+### Railway / Cloud Deployment
 
-1. Push this repo to GitHub, then **New Project** → **Deploy from Repo** in
-   Railway.
-2. Set the `GEMINI_API_KEY` variable in the service settings.
-3. Add a volume mounted at `/app/data` so the library and audio cache survive
-   redeploys.
-4. Railway assigns a public `https://…` domain automatically — no port config
-   needed (the container listens on `38492`; Railway routes to it).
+1. Fork or push this repository to GitHub, then click **New Project** → **Deploy from GitHub repo** in Railway.
+2. Set `GEMINI_API_KEY` in environment variables.
+3. Add a persistent volume mounted at `/app/data`.
+4. Railway routes public traffic automatically to internal port `38492`.
 
-### Fly.io
+### Cloudflare Tunnel (Remote Access)
 
-```bash
-fly launch            # accept the detected Dockerfile; set internal port 38492
-fly volumes create voxshelf_data --size 3 --region <your-region>
-fly secrets set GEMINI_API_KEY=AIza…
-fly deploy
-```
-
-Make sure `fly.toml` mounts the volume at `/app/data`:
-
-```toml
-[mounts]
-  source = "voxshelf_data"
-  destination = "/app/data"
-
-[[services]]
-  internal_port = 38492
-```
-
-### Cloudflare Tunnel (expose your home server securely)
-
-No open ports needed — traffic flows outbound through `cloudflared`:
+Expose your local instance securely without opening inbound ports:
 
 ```bash
 cloudflared tunnel create voxshelf
-cloudflared tunnel route dns voxshelf listen.example.com
+cloudflared tunnel route dns voxshelf listen.yourdomain.com
 ```
 
-`~/.cloudflared/config.yml`:
+In `~/.cloudflared/config.yml`:
 
 ```yaml
 tunnel: <tunnel-id>
 credentials-file: /home/user/.cloudflared/<tunnel-id>.json
 
 ingress:
-  - hostname: listen.example.com
+  - hostname: listen.yourdomain.com
     service: http://localhost:38492
   - service: http_status:404
 ```
+
+Run tunnel:
 
 ```bash
 cloudflared tunnel run voxshelf
 ```
 
-Then open `https://listen.example.com` — HTTPS is handled by Cloudflare, and
-you can add Access (SSO) rules in the Zero Trust dashboard.
+---
 
-## ⚙️ Configuration
+## Configuration
 
-| Variable            | Default                          | Description                                     |
-| ------------------- | -------------------------------- | ----------------------------------------------- |
-| `GEMINI_API_KEY`    | —                                | Gemini API key (can also be set in-app)         |
-| `GEMINI_TTS_MODEL`  | `gemini-3.1-flash-tts-preview`   | Speech synthesis model (`gemini-3.1-flash-tts-preview` or `gemini-3.8-flash-tts-preview`) |
-| `GEMINI_TEXT_MODEL` | `gemini-3.8-flash`               | Summary/explain/chat/OCR model (in-app too)     |
-| `DATA_DIR`          | `./data` (`/app/data` in Docker) | SQLite db + audio cache location                |
-| `DB_PATH`           | `$DATA_DIR/voxshelf.db`         | SQLite file path                                |
-| `PORT`              | `38492`                          | HTTP port                                       |
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `GEMINI_API_KEY` | — | Gemini API key (can also be configured in-app). |
+| `GEMINI_TTS_MODEL` | `gemini-3.1-flash-tts-preview` | Speech synthesis model (`gemini-3.1-flash-tts-preview` or `gemini-3.8-flash-tts-preview`). |
+| `GEMINI_TEXT_MODEL` | `gemini-3.8-flash` | Text generation and OCR model (`gemini-3.8-flash` or `gemini-2.5-flash`). |
+| `DATA_DIR` | `./data` (`/app/data` in Docker) | Directory for SQLite database and cached audio files. |
+| `DB_PATH` | `$DATA_DIR/voxshelf.db` | Explicit SQLite database file location. |
+| `PORT` | `38492` | HTTP listening port. |
+| `API_KEY` | — | Optional password protection for your instance. |
 
-Model names are configurable because Google iterates on preview model IDs —
-if a default stops resolving, point it at the current preview model in
-Settings (or **Fetch Live Models**) without redeploying.
+---
 
-## 📲 PWA installation
+## PWA Installation
 
-VoxShelf is a fully installable Progressive Web App (standalone display,
-offline service worker, Library/Upload shortcuts).
+VoxShelf can be installed directly to your home screen or desktop as a standalone app.
 
-**iPhone / iPad (Safari):**
-
+**iOS / iPadOS (Safari):**
 1. Open your VoxShelf URL in Safari.
-2. Tap **Share** → **Add to Home Screen**.
-3. Tap **Add**. VoxShelf launches full-screen like a native app, with
-   background audio and lock-screen controls.
+2. Tap the **Share** icon and select **Add to Home Screen**.
+3. Tap **Add**. VoxShelf opens in standalone view with background audio support.
 
 **Android (Chrome):**
-
 1. Open your VoxShelf URL in Chrome.
-2. Tap the ⋮ menu → **Install app** (or **Add to Home screen**).
-3. Confirm **Install**. The app appears in your drawer with its own icon and
-   splash screen.
+2. Tap the menu (⋮) and select **Install app** (or **Add to Home screen**).
+3. Confirm installation.
 
-> Tip: for the best mobile experience, serve VoxShelf over HTTPS (required
-> for install prompts and the offline service worker on most browsers).
+---
 
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph Client ["📱 Client (Next.js 15 + React 19 + Tailwind)"]
+    subgraph Client ["Client (Next.js 15 + React 19 + Tailwind)"]
         LIB["Library<br/>folders · search · badges"]
         READER["ReaderView<br/>karaoke · swipe · ruler"]
         PLAYER["usePlayer engine<br/>sentence chain · N+1..N+3 prefetch"]
@@ -377,7 +273,7 @@ flowchart LR
         PWA["PWA shell<br/>service worker · MediaSession"]
     end
 
-    subgraph API ["🖥️ API routes (App Router)"]
+    subgraph API ["API Routes (App Router)"]
         TTS["/api/tts"]
         AUDIO["/api/audio/[hash]"]
         EXT["/api/extract · /api/ocr"]
@@ -386,13 +282,13 @@ flowchart LR
         MISC["/api/settings<br/>/api/voices · /api/models<br/>/api/cache · /api/stats"]
     end
 
-    subgraph Store ["💾 Storage"]
+    subgraph Store ["Storage"]
         DB[("SQLite<br/>docs · sentences<br/>progress · bookmarks")]
         DISK[("Disk cache<br/>WAV clips<br/>content-hashed")]
     end
 
-    subgraph Cloud ["☁️ Google Gemini"]
-        TTSM["TTS model<br/>gemini-3.1-flash-tts"]
+    subgraph Cloud ["Google Gemini"]
+        TTSM["TTS model<br/>gemini-3.1-flash-tts / 3.8"]
         TXTM["Text model<br/>gemini-3.8-flash"]
     end
 
@@ -410,191 +306,112 @@ flowchart LR
     AUDIO --> DISK
 ```
 
-### How it works
+### Pipeline Overview
 
-- **Import** (`/api/extract`, `/api/ocr`): files/URLs are converted to clean
-  text (pdf-parse, mammoth, EPUB spine parsing, Readability, Tesseract /
-  Gemini Vision), optionally AI-cleaned, then stored with per-sentence offsets.
-- **Speech** (`/api/tts`): each sentence is hashed with its voice + style
-  prompt; cache hits stream instantly from `/api/audio/[hash]`, misses are
-  synthesized with Gemini TTS (long sentences are chunked and stitched into
-  one WAV) and stored in SQLite + on disk.
-- **Playback**: the client chains per-sentence audio through one element,
-  prefetches the next 3 sentences, maps elapsed time to word highlights, and
-  publishes metadata + transport handlers to the OS via MediaSession.
-- **AI** (`/api/ai/*`): summaries use map-reduce so full books work; the
-  explainer and chat use surrounding sentences as grounding context.
+- **Document Ingestion:** Text extraction supports PDF, EPUB, DOCX, TXT, Markdown, web URLs (Readability), and image OCR (Tesseract or Gemini Vision). Extracted text is segmented into sentence boundaries with accurate character offsets.
+- **Audio Synthesis & Caching:** Each sentence is synthesized through Gemini Flash TTS using its text and voice style parameters. Generated audio is cached as WAV files indexed by content hash. Subsequent listens to the same sentence are served directly from disk.
+- **Sentence Chaining:** The frontend playback engine pre-fetches upcoming sentence clips, dynamically maps audio playback position to word boundaries for karaoke tracking, and updates system MediaSession handlers.
 
-### Project layout
+---
 
-```
-src/
-  app/            Next.js App Router: pages + API routes
-  components/     Library, ImportModal, ReaderView, PlayerBar, AIDrawer, …
-  hooks/          usePlayer (sentence-chained playback engine)
-  lib/            db, settings, gemini, tts, audio cache, documents,
-                  extract/ (pdf, docx, epub, text, url, ocr), voices, text
-data/             voxshelf.db + audio/ cache (created at runtime, git-ignored)
-Dockerfile        multi-stage production image (standalone output)
-docker-compose.yml  app + persistent ./data volume
-```
+## REST API Reference
 
-### Database schema
+Base URL: `http://localhost:38492`. Responses return standard JSON with HTTP error codes on failure.
 
-SQLite (`better-sqlite3`, with automatic fallback to Node’s built-in
-`node:sqlite`):
+### Audio & Synthesis
 
-- **documents** — title, author, source, full text, counts, voice/style/speed,
-  tags, reading progress, archive flag, timestamps.
-- **sentences** — `(doc_id, idx)` text + char offsets + linked audio hash.
-- **audio_cache** — content-hash → voice/style, file path, bytes, duration,
-  usage stats (LRU-friendly).
-- **bookmarks** — sentence anchors + notes.
-- **highlights** — sentence anchors + quoted text + color + notes.
-- **podcasts** — generated episodes + stitched audio.
-- **folders / pronunciations / settings** — organization, TTS overrides, app
-  config.
+| Route | Method | Purpose |
+| ----- | ------ | ------- |
+| `/api/tts` | POST | Synthesizes sentence text → returns `{ url, hash, durationMs }`. |
+| `/api/audio/[hash]` | GET | Streams cached immutable WAV clip. |
 
-## 📡 REST API reference
-
-Base URL: `http://localhost:38492`. All bodies are JSON unless noted.
-Errors return `{ "error": "<message>" }` with an appropriate status code.
-
-### Speech & audio
-
-| Route               | Method | Purpose                                            |
-| ------------------- | ------ | -------------------------------------------------- |
-| `/api/tts`          | POST   | Synthesize text → `{ url, hash, durationMs }`      |
-| `/api/audio/[hash]` | GET    | Stream a cached WAV (immutable, cacheable)         |
-
-`POST /api/tts` body:
+Example `POST /api/tts` payload:
 
 ```json
 {
-  "text": "Hello world.",
+  "text": "The quick brown fox jumps over the lazy dog.",
   "voice": "Kore",
-  "stylePrompt": "warm bedtime-story voice"
+  "stylePrompt": "calm, natural audiobook tone"
 }
 ```
 
-### Documents & library
+### Documents & Library
 
-| Route                                     | Method(s)       | Purpose                                             |
-| ----------------------------------------- | --------------- | --------------------------------------------------- |
-| `/api/documents`                          | GET / POST      | List (see filters) / create a document              |
-| `/api/documents/[id]`                     | GET/PATCH/DELETE| Detail (sentences+bookmarks+highlights) / update    |
-| `/api/documents/[id]/audio`               | GET             | Whole document as one WAV (`?download=1` to save)   |
-| `/api/documents/[id]/bookmarks`           | GET / POST      | List / add a bookmark                               |
-| `/api/documents/[id]/bookmarks/[bid]`     | DELETE          | Remove a bookmark                                   |
-| `/api/documents/[id]/highlights`          | GET / POST      | List / add a highlight + note                       |
-| `/api/documents/[id]/highlights/[hid]`    | PATCH / DELETE  | Edit note/color / remove a highlight                |
-| `/api/documents/[id]/prerender`           | GET / POST      | Cache-coverage stats / pre-render audio             |
-| `/api/folders`                            | GET / POST      | List / create folders                               |
-| `/api/folders/[id]`                       | DELETE          | Delete a folder (docs become unfiled)               |
+| Route | Method | Purpose |
+| ----- | ------ | ------- |
+| `/api/documents` | GET / POST | List documents with query filters, or create a new entry. |
+| `/api/documents/[id]` | GET / PATCH / DELETE | Fetch full document, update metadata/progress, or delete. |
+| `/api/documents/[id]/audio` | GET | Stream or download concatenated full-document audio. |
+| `/api/documents/[id]/bookmarks` | GET / POST | Retrieve or add sentence bookmarks. |
+| `/api/documents/[id]/highlights` | GET / POST | Retrieve or add colored highlights and notes. |
+| `/api/documents/[id]/prerender` | GET / POST | Inspect audio cache coverage or trigger background pre-render. |
+| `/api/folders` | GET / POST | Manage organizational folders. |
 
-`GET /api/documents` query params: `q` (search), `tag`, `sort`
-(`updated`/`created`/`title`/`progress`), `archived=1`, `folder=<id|unfiled>`.
+### Ingestion & AI
 
-`PATCH /api/documents/[id]` accepts partial fields: `title`, `author`,
-`voice`, `stylePrompt`, `speed`, `tags`, `folderId`, `isArchived`,
-`progressSentenceIndex`, `progressCharOffset`.
+| Route | Method | Purpose |
+| ----- | ------ | ------- |
+| `/api/extract` | POST (multipart) | Extract structured text from uploaded documents or URLs. |
+| `/api/ocr` | POST (multipart) | Run optical character recognition on uploaded images. |
+| `/api/ai/summary` | POST | Generate brief or comprehensive document summaries. |
+| `/api/ai/explain` | POST | Explain highlighted passages in context. |
+| `/api/ai/chat` | POST | Grounded question and answering against document text. |
+| `/api/ai/quiz` | POST | Generate comprehension quizzes and flashcards. |
+| `/api/ai/podcast` | GET / POST | Generate 2-host conversational podcast episodes. |
 
-### Import & OCR
+### Settings & Utilities
 
-| Route          | Method         | Purpose                                         |
-| -------------- | -------------- | ----------------------------------------------- |
-| `/api/extract` | POST (multipart) | File (PDF/EPUB/DOCX/TXT/MD/image) or URL → text |
-| `/api/ocr`     | POST (multipart) | Image → OCR text (`engine`: `ai` or `local`)    |
+| Route | Method | Purpose |
+| ----- | ------ | ------- |
+| `/api/voices` | GET | List available voice presets and metadata. |
+| `/api/models` | GET | Query supported Gemini TTS and text generation models. |
+| `/api/settings` | GET / PUT | Read or update configuration options. |
+| `/api/pronunciations` | GET / POST / DELETE | Manage custom pronunciation dictionary substitutions. |
+| `/api/stats` | GET | Retrieve reading history and engagement metrics. |
+| `/api/health` | GET | Service health probe. |
 
-### AI
+---
 
-| Route              | Method | Purpose                                              |
-| ------------------ | ------ | ---------------------------------------------------- |
-| `/api/ai/summary`  | POST   | Document summary (`{ documentId, length }`)          |
-| `/api/ai/explain`  | POST   | Explain selected text (`{ text, context }`)          |
-| `/api/ai/chat`     | POST   | Grounded Q&A (`{ documentId, messages, userQuestion }`) |
-| `/api/ai/quiz`     | POST   | Quiz + flashcards (`{ documentId }`)                 |
-| `/api/ai/podcast`  | GET/POST | List episodes / generate 2-host episode            |
-| `/api/ai/cleanup`  | POST   | Fix OCR/extraction artifacts (`{ text }`)            |
-| `/api/ai/transcribe` | POST (multipart) | Microphone audio → cleaned transcript         |
+## Keyboard Shortcuts
 
-### Settings, voices & stats
+Press `?` anywhere in the app to view shortcuts.
 
-| Route                  | Method(s)    | Purpose                                            |
-| ---------------------- | ------------ | -------------------------------------------------- |
-| `/api/voices`          | GET          | All 30 voices + default                            |
-| `/api/models`          | GET          | TTS/text model lists (`?key=` overrides lookup key)|
-| `/api/settings`        | GET / PUT    | Public settings (key never exposed) / update       |
-| `/api/pronunciations`  | GET/POST/DELETE | Pronunciation dictionary entries                |
-| `/api/cache`           | GET / DELETE | Audio-cache stats / clear                          |
-| `/api/stats`           | GET          | Reading stats, streaks, history                    |
-| `/api/stats/session`   | POST         | Record a reading session (`{ docId, ... }`)        |
-| `/api/data/export`     | GET          | Full library backup (JSON)                         |
-| `/api/data/import`     | POST         | Restore a backup (JSON)                            |
+| Shortcut | Action |
+| -------- | ------ |
+| `Space` | Play / Pause |
+| `←` / `→` | Previous / Next sentence |
+| `Shift` + `←` / `→` | Jump backward / forward 15 seconds |
+| `↑` / `↓` | Adjust playback speed ±0.1x |
+| `R` | Toggle reading focus ruler |
+| `B` | Bookmark active sentence |
+| `A` | Open AI assistant panel |
+| `P` | Open podcast generator |
+| `?` | Toggle shortcuts modal |
+| `Esc` | Close open drawers and modals |
 
-### Sync & health
+---
 
-| Route                  | Method(s)    | Purpose                                            |
-| ---------------------- | ------------ | -------------------------------------------------- |
-| `/api/sync/pull`       | POST         | Rows newer than cursors (`{ v, cursors, tables? }`)|
-| `/api/sync/push`       | POST         | Idempotent LWW merge (`{ v, changes, tombstones }`)|
-| `/api/sync/status`     | GET          | Local sync config + last-cycle summary             |
-| `/api/sync/config`     | POST         | Set server URL / enabled (`{ serverUrl, enabled }`)|
-| `/api/sync/now`        | POST         | Run one push/pull cycle now                        |
-| `/api/sync/library`    | GET          | Lightweight server catalog (titles, no text)       |
-| `/api/sync/fetch`      | POST         | Full rows for explicit doc ids (`{ v, ids }`)      |
-| `/api/sync/download`   | POST         | Pull docs/folders from peer here                   |
-| `/api/sync/remove`     | POST         | Delete from this device only (peer keeps them)     |
-| `/api/auth/status`     | GET          | Lock state (`{ locked, authed }`, always open)     |
-| `/api/auth/login`      | POST         | Unlock with key (`{ key }` → httpOnly cookie)      |
-| `/api/auth/logout`     | POST         | Clear this browser's access                        |
-| `/api/health`          | GET          | Liveness probe (`{ ok, version, engine, time }`)   |
+## Contributing
 
-## ⌨️ Keyboard shortcuts
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for local development conventions, styling guides, and pull request workflows.
 
-Press `?` anywhere in the app to open the cheat sheet.
-
-### Playback & navigation
-
-| Keys            | Action                 |
-| --------------- | ---------------------- |
-| `Space`         | Play / pause           |
-| `←` / `→`       | Previous / next sentence |
-| `Shift` + `←`/`→` | Skip ∓15 seconds     |
-| `↑` / `↓`       | Speed +0.1× / −0.1×    |
-
-### Reading & study tools
-
-| Keys  | Action                                  |
-| ----- | --------------------------------------- |
-| `R`   | Toggle reading ruler                    |
-| `B`   | Bookmark current sentence               |
-| `A`   | Open AI assistant                       |
-| `P`   | Generate / open AI podcast              |
-| `?`   | Toggle shortcuts help                   |
-| `Esc` | Close modals and drawers                |
-
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev setup, coding conventions,
-and PR process — and our [Code of Conduct](CODE_OF_CONDUCT.md).
+Before submitting changes, make sure checks pass:
 
 ```bash
-npm run typecheck   # must pass
-npm run build       # must pass
+npm run typecheck
+npm run build
 ```
 
-## 📝 Notes & limits
+---
 
-- TTS, AI summary/explain/chat/quiz/podcast and Vision OCR require a Gemini
-  API key; on-device Tesseract OCR, the library, and cached-audio playback
-  work without one.
-- First on-device OCR run downloads Tesseract language data (~12 MB) and is
-  slower; results improve dramatically with the AI engine.
-- Google Docs import needs “Anyone with the link can view” sharing.
-- Browsers require a user tap before audio starts; after that, background and
-  lock-screen playback work via MediaSession.
+## Notes & Limitations
 
-## 📄 License
+- Gemini Flash TTS, AI summarization/chat/quizzes, and Vision OCR require a Gemini API key. Basic document reading, on-device Tesseract OCR, and offline playback of cached audio function without an API key.
+- Web browsers require a user interaction (such as pressing play) before initializing audio output. Once started, background and lock-screen audio will continue uninterrupted.
+- Google Docs import requires links set to "Anyone with the link can view".
+
+---
+
+## License
 
 MIT — see [LICENSE](LICENSE).
