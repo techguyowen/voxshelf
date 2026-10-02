@@ -10,7 +10,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind-3-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![Gemini TTS](https://img.shields.io/badge/Gemini-3.1_TTS-8E75B2?logo=google&logoColor=white)](https://aistudio.google.com/)
+[![Gemini TTS](https://img.shields.io/badge/Gemini-3.1_/_3.8_TTS-8E75B2?logo=google&logoColor=white)](https://aistudio.google.com/)
 [![Gemini Text](https://img.shields.io/badge/Gemini-3.8_Text-8E75B2?logo=google&logoColor=white)](https://aistudio.google.com/)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald)](LICENSE)
@@ -28,7 +28,7 @@ Commercial TTS apps and reading tools charge **\$100 to \$250+ every year** — 
 
 VoxShelf was created to change that:
 - **Free & Self-Hostable:** Run it on your local laptop, desktop, home server, Docker, or Raspberry Pi.
-- **Pennies (or Free) with Gemini:** Powered by Google's Gemini API, you get ultra-natural voices (Gemini 3.1 Flash TTS), document understanding, summarization, quizzes, and podcast generation using your own API key — virtually free under standard free-tier limits or pennies per month under paid API usage.
+- **Pennies (or Free) with Gemini:** Powered by Google's Gemini API, you get ultra-natural voices (choose between **Gemini 3.1 Flash TTS** or **Gemini 3.8 Flash TTS**), document understanding, summarization, quizzes, and podcast generation using your own API key — virtually free under standard free-tier limits or pennies per month under paid API usage.
 - **Built for Real Readers & Thinkers:** OpenDyslexic typography, bionic reading fixation mode, focus rulers, word-by-word karaoke highlighting, multi-device sync, and full offline mode.
 
 No subscriptions. No artificial paywalls. Just a fast, beautifully crafted reader that works for you.
@@ -39,7 +39,7 @@ No subscriptions. No artificial paywalls. Just a fast, beautifully crafted reade
 
 ### 🔊 Listening
 
-- 🎙️ **30 Gemini voices** (Zephyr, Puck, Charon, Kore, Fenrir, … Sulafat) with
+- 🎙️ **30 Gemini voices across Gemini 3.1 & 3.8 Flash TTS** (Zephyr, Puck, Charon, Kore, Fenrir, … Sulafat) with
   tone badges and adjustable style prompts (“warm bedtime-story voice”).
 - ⚡ **0.5×–4.5× speed** with a slider plus one-tap quick pills
   (`0.75x 1.0x 1.25x 1.5x 1.75x 2.0x 2.5x`).
@@ -333,7 +333,7 @@ you can add Access (SSO) rules in the Zero Trust dashboard.
 | Variable            | Default                          | Description                                     |
 | ------------------- | -------------------------------- | ----------------------------------------------- |
 | `GEMINI_API_KEY`    | —                                | Gemini API key (can also be set in-app)         |
-| `GEMINI_TTS_MODEL`  | `gemini-3.1-flash-tts-preview`   | Speech synthesis model (overridable in-app)     |
+| `GEMINI_TTS_MODEL`  | `gemini-3.1-flash-tts-preview`   | Speech synthesis model (`gemini-3.1-flash-tts-preview` or `gemini-3.8-flash-tts-preview`) |
 | `GEMINI_TEXT_MODEL` | `gemini-3.8-flash`               | Summary/explain/chat/OCR model (in-app too)     |
 | `DATA_DIR`          | `./data` (`/app/data` in Docker) | SQLite db + audio cache location                |
 | `DB_PATH`           | `$DATA_DIR/voxshelf.db`         | SQLite file path                                |
