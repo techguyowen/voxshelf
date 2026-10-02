@@ -9,8 +9,8 @@ import {
   type ReactNode,
 } from "react";
 
-export type Theme = "light" | "dark" | "oled";
-export type ThemeMode = "system" | "light" | "dark" | "oled";
+export type Theme = "light" | "dark" | "oled" | "carolina";
+export type ThemeMode = "system" | "light" | "dark" | "oled" | "carolina";
 
 function resolveSystem(): Theme {
   if (
@@ -46,6 +46,7 @@ function loadMode(): ThemeMode {
       stored === "light" ||
       stored === "dark" ||
       stored === "oled" ||
+      stored === "carolina" ||
       stored === "system"
     ) {
       return stored;
@@ -76,10 +77,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [mode]);
 
   useEffect(() => {
-    // OLED is a dark variant: keep the `dark` class so every dark: utility
-    // applies, and add `oled` for the pure-black overrides in globals.css.
+    // OLED and Carolina are dark variants: keep the `dark` class so every dark: utility
+    // applies, and add `oled` / `carolina` for specific color overrides.
     document.documentElement.classList.toggle("dark", theme !== "light");
     document.documentElement.classList.toggle("oled", theme === "oled");
+    document.documentElement.classList.toggle("carolina", theme === "carolina");
     try {
       localStorage.setItem("vs-theme", mode);
     } catch {
@@ -90,7 +92,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const toggle = useCallback(() => {
     setModeState((m) => {
       if (m === "system") return resolveSystem() === "dark" ? "light" : "dark";
-      if (m === "oled") return "light";
+      if (m === "oled" || m === "carolina") return "light";
       return m === "dark" ? "light" : "dark";
     });
   }, []);

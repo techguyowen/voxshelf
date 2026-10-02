@@ -5,6 +5,20 @@ const config: Config = {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      colors: {
+        carolina: {
+          DEFAULT: "#7BAFD4",
+          hover: "#93BFDF",
+          subtle: "#12263A",
+          on: "#081018",
+          canvas: "#090D13",
+          surface: "#101722",
+          "surface-raised": "#182230",
+          border: "#243242",
+          primary: "#F0F6FC",
+          secondary: "#8B9BB0",
+        },
+      },
       fontFamily: {
         dyslexic: [
           "OpenDyslexic",

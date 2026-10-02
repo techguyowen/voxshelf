@@ -52,6 +52,95 @@ body {
   border-color: #2a2a2a !important;
 }
 
+/* ---- Antigravity Carolina theme: Midnight Slate canvas (#090D13), surface (#101722), surface-raised (#182230), border (#243242), UNC Carolina Blue accent (#7BAFD4) ---- */
+.carolina {
+  color-scheme: dark;
+  background-color: #090D13;
+}
+
+.carolina body {
+  background-color: #090D13 !important;
+  color: #F0F6FC !important;
+}
+
+.carolina.dark .dark\:bg-zinc-950 {
+  background-color: #090D13 !important;
+}
+
+.carolina.dark .dark\:bg-zinc-950\/90 {
+  background-color: rgb(9 13 19 / 0.92) !important;
+}
+
+.carolina.dark .dark\:bg-zinc-950\/95 {
+  background-color: rgb(9 13 19 / 0.95) !important;
+}
+
+.carolina.dark .dark\:bg-zinc-900 {
+  background-color: #101722 !important;
+}
+
+.carolina.dark .dark\:bg-zinc-800,
+.carolina.dark .dark\:bg-zinc-800\/70,
+.carolina.dark .dark\:bg-zinc-800\/80 {
+  background-color: #182230 !important;
+}
+
+.carolina.dark .dark\:border-zinc-800 {
+  border-color: #243242 !important;
+}
+
+.carolina.dark .dark\:border-zinc-700 {
+  border-color: #2e3e52 !important;
+}
+
+.carolina.dark .dark\:text-zinc-100 {
+  color: #F0F6FC !important;
+}
+
+.carolina.dark .dark\:text-zinc-400,
+.carolina.dark .dark\:text-zinc-500 {
+  color: #8B9BB0 !important;
+}
+
+.carolina .bg-emerald-600,
+.carolina .bg-emerald-500,
+.carolina.dark .dark\:bg-emerald-500,
+.carolina.dark .dark\:bg-emerald-600 {
+  background-color: #7BAFD4 !important;
+  color: #081018 !important;
+}
+
+.carolina .bg-emerald-600:hover,
+.carolina .bg-emerald-500:hover,
+.carolina.dark .dark\:bg-emerald-400:hover,
+.carolina.dark .dark\:bg-emerald-500:hover {
+  background-color: #93BFDF !important;
+  color: #081018 !important;
+}
+
+.carolina .text-emerald-500,
+.carolina .text-emerald-600,
+.carolina.dark .dark\:text-emerald-400,
+.carolina.dark .dark\:text-emerald-300 {
+  color: #7BAFD4 !important;
+}
+
+.carolina .bg-emerald-100,
+.carolina.dark .dark\:bg-emerald-950\/70,
+.carolina.dark .dark\:bg-emerald-950\/50 {
+  background-color: #12263A !important;
+  color: #7BAFD4 !important;
+}
+
+.carolina.dark .vf-eq-bar {
+  background: #7BAFD4 !important;
+}
+
+.carolina input[type="range"],
+.carolina.dark input[type="range"] {
+  accent-color: #7BAFD4 !important;
+}
+
 /* ---- Karaoke reader sentences ---- */
 .vf-sentence {
   display: block;
@@ -108,6 +197,20 @@ body {
 }
 
 /* ---- Cursor / highlight color variants (data-cursor on reader) ---- */
+[data-cursor="carolina"] .vf-word-active {
+  background-color: #7BAFD4 !important;
+  color: #081018 !important;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(123, 175, 212, 0.45) !important;
+}
+[data-cursor="carolina"] .vf-sentence-active {
+  background-color: rgb(123 175 212 / 0.25) !important;
+  box-shadow: 0 0 0 1px rgb(123 175 212 / 0.4), 0 2px 14px rgb(123 175 212 / 0.18) !important;
+}
+.dark [data-cursor="carolina"] .vf-sentence-active {
+  background-color: rgb(18 38 58 / 0.7) !important;
+  box-shadow: 0 0 0 1px rgb(123 175 212 / 0.45), 0 2px 16px rgb(123 175 212 / 0.2) !important;
+}
 [data-cursor="blue"] .vf-word-active {
   background-color: #38bdf8 !important;
   box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.45) !important;

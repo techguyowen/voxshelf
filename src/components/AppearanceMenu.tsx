@@ -1,10 +1,10 @@
 "use client";
 
-import { BookOpenText, Check, Eclipse, Laptop, Moon, Sun } from "lucide-react";
+import { BookOpenText, Check, Eclipse, Laptop, Moon, Sparkles, Sun } from "lucide-react";
 import type { ReaderPageWidth } from "@/lib/types";
 import { useTheme, type ThemeMode } from "./ThemeContext";
 
-export type CursorColor = "yellow" | "blue" | "green" | "purple" | "pink" | "orange";
+export type CursorColor = "yellow" | "blue" | "green" | "purple" | "pink" | "orange" | "carolina";
 
 export type AppearanceFont =
   | "georgia"
@@ -55,6 +55,7 @@ export function saveAppearance(prefs: AppearancePrefs): void {
 
 export const CURSOR_COLORS: { id: CursorColor; label: string; swatch: string }[] = [
   { id: "yellow", label: "Amber", swatch: "#facc15" },
+  { id: "carolina", label: "Carolina Blue", swatch: "#7bafd4" },
   { id: "blue", label: "Sapphire", swatch: "#38bdf8" },
   { id: "green", label: "Emerald", swatch: "#34d399" },
   { id: "purple", label: "Violet", swatch: "#a78bfa" },
@@ -91,6 +92,7 @@ export function appearanceFontClass(font: AppearanceFont): string {
 const THEME_OPTIONS: { id: ThemeMode; label: string; icon: React.ReactNode }[] = [
   { id: "system", label: "System", icon: <Laptop size={15} /> },
   { id: "dark", label: "Dark", icon: <Moon size={15} /> },
+  { id: "carolina", label: "Carolina", icon: <Sparkles size={15} /> },
   { id: "oled", label: "OLED Black", icon: <Eclipse size={15} /> },
   { id: "light", label: "Light", icon: <Sun size={15} /> },
 ];

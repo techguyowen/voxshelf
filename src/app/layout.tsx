@@ -29,7 +29,7 @@ export const viewport: Viewport = {
   ],
 };
 
-const THEME_INIT = `(function(){try{var t=localStorage.getItem('vs-theme')||localStorage.getItem('vf-theme');if(t!=='light'&&t!=='dark'&&t!=='oled'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.classList.toggle('dark',t!=='light');document.documentElement.classList.toggle('oled',t==='oled');}catch(e){document.documentElement.classList.add('dark');}})();`;
+const THEME_INIT = `(function(){try{var t=localStorage.getItem('vs-theme')||localStorage.getItem('vf-theme');if(t!=='light'&&t!=='dark'&&t!=='oled'&&t!=='carolina'){t=window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.classList.toggle('dark',t!=='light');document.documentElement.classList.toggle('oled',t==='oled');document.documentElement.classList.toggle('carolina',t==='carolina');}catch(e){document.documentElement.classList.add('dark');}})();`;
 
 export default function RootLayout({
   children,
