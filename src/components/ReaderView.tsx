@@ -9,11 +9,17 @@ import {
   Keyboard,
   Loader2,
   Mic,
+  Pause,
+  Play,
+  RotateCcw,
+  RotateCw,
   Sparkles,
   StickyNote,
   Timer,
   TriangleAlert,
   Type,
+  Volume2,
+  VolumeX,
   X,
   Zap,
 } from "lucide-react";
@@ -458,7 +464,201 @@ function TimelineScrubber({
   );
 }
 
-type AiTab = "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" | "highlights";
+function formatAudioClock(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "0:00";
+  const m = Math.floor(totalSeconds / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+const ORIG_SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2];
+
+function OriginalAudioPlayerBar({
+  doc,
+  audioUrl,
+  onSwitchToGemini,
+  onOpenNotes,
+}: {
+  doc: DocumentDetail;
+  audioUrl: string;
+  onSwitchToGemini: () => void;
+  onOpenNotes: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [speed, setSpeed] = useState(1);
+  const [volume, setVolumeState] = useState(() => loadVolume());
+  const [muted, setMutedState] = useState(() => loadMuted());
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.playbackRate = speed;
+  }, [speed]);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.volume = muted ? 0 : volume;
+  }, [volume, muted]);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  };
+
+  const skip = (secs: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + secs));
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = Number(e.target.value);
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = val;
+    setCurrentTime(val);
+  };
+
+  return (
+    <footer className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 px-4 py-2.5 shadow-2xl backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/95">
+      <audio
+        ref={audioRef}
+        src={audioUrl}
+        preload="metadata"
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        onEnded={() => setIsPlaying(false)}
+      />
+
+      <div className="mx-auto flex max-w-4xl flex-col gap-2">
+        {/* Scrubber Progress Bar */}
+        <div className="flex items-center gap-2">
+          <span className="w-10 text-right font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+            {formatAudioClock(currentTime)}
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={duration || 100}
+            step={0.1}
+            value={currentTime}
+            onChange={handleSeek}
+            className="h-1.5 flex-1 cursor-pointer accent-emerald-600 dark:accent-emerald-400"
+            aria-label="Seek original audio"
+          />
+          <span className="w-10 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+            {formatAudioClock(duration)}
+          </span>
+        </div>
+
+        {/* Controls Row */}
+        <div className="flex items-center justify-between">
+          {/* Left: Mode Badge & Switcher */}
+          <div className="flex items-center gap-2">
+            <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 font-medium text-[11px] text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+              <Mic size={12} /> Original Audio
+            </span>
+            <button
+              onClick={onSwitchToGemini}
+              className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title="Switch to Gemini AI Voice narration"
+            >
+              <Sparkles size={12} className="text-emerald-600 dark:text-emerald-400" />
+              <span>Gemini Voice</span>
+            </button>
+          </div>
+
+          {/* Center: Skip & Play/Pause */}
+          <div className="flex items-center gap-2 sm:gap-4">
+            <button
+              onClick={() => skip(-15)}
+              className="flex items-center gap-0.5 rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title="Skip back 15 seconds"
+              aria-label="Skip back 15 seconds"
+            >
+              <RotateCcw size={17} />
+              <span className="text-[10px] font-bold">15</span>
+            </button>
+
+            <button
+              onClick={togglePlay}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600 text-white shadow hover:bg-emerald-700 active:scale-95 dark:bg-emerald-500 dark:text-zinc-950"
+              aria-label={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
+            </button>
+
+            <button
+              onClick={() => skip(15)}
+              className="flex items-center gap-0.5 rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title="Skip forward 15 seconds"
+              aria-label="Skip forward 15 seconds"
+            >
+              <span className="text-[10px] font-bold">15</span>
+              <RotateCw size={17} />
+            </button>
+          </div>
+
+          {/* Right: Speed, Volume, Notes */}
+          <div className="flex items-center gap-2">
+            {/* Speed Selector */}
+            <div className="flex items-center rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-800">
+              <select
+                value={speed}
+                onChange={(e) => setSpeed(Number(e.target.value))}
+                className="bg-transparent px-1.5 py-0.5 text-xs font-semibold text-zinc-700 outline-none dark:text-zinc-300"
+                aria-label="Playback speed"
+              >
+                {ORIG_SPEED_OPTIONS.map((s) => (
+                  <option key={s} value={s} className="dark:bg-zinc-900">
+                    {s}×
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Volume Toggle */}
+            <button
+              onClick={() => {
+                const nextMuted = !muted;
+                setMutedState(nextMuted);
+                saveMuted(nextMuted);
+              }}
+              className="rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              title={muted ? "Unmute" : "Mute"}
+              aria-label={muted ? "Unmute" : "Mute"}
+            >
+              {muted || volume === 0 ? <VolumeX size={17} /> : <Volume2 size={17} />}
+            </button>
+
+            {/* Notes Button */}
+            <button
+              onClick={onOpenNotes}
+              className="flex items-center gap-1 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300 dark:hover:bg-emerald-900"
+              title="View Structured Notes"
+            >
+              <StickyNote size={13} />
+              <span className="hidden sm:inline">Notes</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+type AiTab = "notes" | "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" | "highlights";
 
 export function ReaderView({ docId }: { docId: string }) {
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
@@ -478,6 +678,17 @@ export function ReaderView({ docId }: { docId: string }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiTab, setAiTab] = useState<AiTab>("summary");
   const [tocOpen, setTocOpen] = useState(false);
+
+  const hasOriginalAudio = Boolean(doc?.originalAudioUrl);
+  const [playbackSource, setPlaybackSource] = useState<"original" | "gemini">("original");
+
+  useEffect(() => {
+    if (doc?.originalAudioUrl) {
+      setPlaybackSource("original");
+    } else {
+      setPlaybackSource("gemini");
+    }
+  }, [doc?.id, doc?.originalAudioUrl]);
 
   function openAi(tab: AiTab = "summary") {
     setAiTab(tab);
@@ -1131,6 +1342,7 @@ export function ReaderView({ docId }: { docId: string }) {
         if (e.shiftKey) return;
         const k = e.key.toLowerCase();
         if (k === "b") addBookmark("");
+        else if (k === "n") openAi("notes");
         else if (k === "r")
           setPrefs((p) => ({ ...p, rulerMode: !p.rulerMode }));
         else if (k === "a") openAi("summary");
@@ -1246,6 +1458,19 @@ export function ReaderView({ docId }: { docId: string }) {
           <span className="hidden sm:inline">TOC</span>
         </button>
         <button
+          onClick={() => openAi("notes")}
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+            doc.audioNotes
+              ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:hover:bg-emerald-900"
+              : "text-zinc-600 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          }`}
+          aria-label="Audio Notes"
+          title="Notes & Takeaways (N)"
+        >
+          <StickyNote size={15} />
+          <span className="hidden sm:inline">Notes</span>
+        </button>
+        <button
           onClick={() => openAi("summary")}
           className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
           aria-label="Open AI assistant"
@@ -1311,6 +1536,55 @@ export function ReaderView({ docId }: { docId: string }) {
           📱<span className="hidden sm:inline">{onDevice?.onDevice ? "Saved" : "Download"}</span>
         </button>
       </div>
+
+      {/* Dual Playback Switcher */}
+      {hasOriginalAudio && (
+        <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-emerald-500/20 bg-emerald-50/40 p-2.5 backdrop-blur-sm dark:border-emerald-500/20 dark:bg-emerald-950/20">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Audio:
+            </span>
+            <div className="inline-flex rounded-xl bg-zinc-200/80 p-0.5 dark:bg-zinc-800">
+              <button
+                type="button"
+                onClick={() => {
+                  if (player.status === "playing") player.pause();
+                  setPlaybackSource("original");
+                }}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  playbackSource === "original"
+                    ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-900 dark:text-emerald-300"
+                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                }`}
+              >
+                <Mic size={13} />
+                <span>Original Audio</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlaybackSource("gemini")}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  playbackSource === "gemini"
+                    ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-900 dark:text-emerald-300"
+                    : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                }`}
+              >
+                <Sparkles size={13} />
+                <span>Gemini Voice</span>
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => openAi("notes")}
+            className="flex items-center gap-1.5 rounded-xl border border-emerald-600/30 bg-emerald-100/60 px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-200/60 dark:border-emerald-500/30 dark:bg-emerald-950/60 dark:text-emerald-200 dark:hover:bg-emerald-900/60"
+          >
+            <StickyNote size={14} />
+            <span>Structured Notes</span>
+          </button>
+        </div>
+      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         <span
@@ -1580,7 +1854,16 @@ export function ReaderView({ docId }: { docId: string }) {
           </div>
         )}
 
-      <PlayerBar player={player} doc={doc} onOpenAI={() => openAi("summary")} />
+      {hasOriginalAudio && playbackSource === "original" ? (
+        <OriginalAudioPlayerBar
+          doc={doc}
+          audioUrl={doc.originalAudioUrl!}
+          onSwitchToGemini={() => setPlaybackSource("gemini")}
+          onOpenNotes={() => openAi("notes")}
+        />
+      ) : (
+        <PlayerBar player={player} doc={doc} onOpenAI={() => openAi("summary")} />
+      )}
       {pronOpen && <PronunciationModal onClose={() => setPronOpen(false)} />}
       <AutoSkipModal
         open={showAutoSkip}

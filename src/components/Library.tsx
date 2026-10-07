@@ -13,10 +13,12 @@ import {
   Link2,
   List,
   Loader2,
+  Mic,
   Pencil,
   Plus,
   ScanLine,
   Search,
+  StickyNote,
   Trash2,
   X,
   Zap,
@@ -50,6 +52,10 @@ const FOLDER_COLORS = [
 
 function sourceBadge(source: SourceType): { label: string; icon: React.ReactNode } {
   switch (source) {
+    case "audio-recording":
+      return { label: "Audio", icon: <Mic size={12} /> };
+    case "voice-note":
+      return { label: "Voice Note", icon: <Mic size={12} /> };
     case "file-pdf":
       return { label: "PDF", icon: <FileText size={12} /> };
     case "file-epub":
@@ -850,6 +856,18 @@ export function Library() {
                       {badge.icon}
                       {badge.label}
                     </span>
+                    {(doc.originalAudioUrl || doc.sourceType === "audio-recording" || doc.sourceType === "voice-note") && doc.sourceType !== "audio-recording" && (
+                      <span className="flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        <Mic size={11} />
+                        Audio
+                      </span>
+                    )}
+                    {doc.audioNotes && (
+                      <span className="flex shrink-0 items-center gap-1 rounded-full bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-800 dark:bg-cyan-950 dark:text-cyan-300">
+                        <StickyNote size={11} />
+                        Notes
+                      </span>
+                    )}
                     {doc.isArchived && (
                       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                         Archived

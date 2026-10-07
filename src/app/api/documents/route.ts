@@ -70,6 +70,7 @@ export async function POST(req: NextRequest) {
       stylePrompt: body.stylePrompt,
       speed: body.speed,
       tags: body.tags,
+      metadata: (body as { metadata?: unknown }).metadata as never,
     });
     return NextResponse.json(doc, { status: 201 });
   } catch (err) {

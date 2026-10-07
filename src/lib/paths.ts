@@ -15,8 +15,11 @@ export const AUDIO_DIR: string = path.join(DATA_DIR, "audio");
 
 export const UPLOAD_DIR: string = path.join(DATA_DIR, "uploads");
 
+export const RECORDINGS_DIR: string = path.join(DATA_DIR, "recordings");
+
 export function ensureDirs(): void {
   mkdirSync(DATA_DIR, { recursive: true });
   mkdirSync(AUDIO_DIR, { recursive: true });
   mkdirSync(UPLOAD_DIR, { recursive: true });
+  mkdirSync(RECORDINGS_DIR, { recursive: true });
 }

@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { getTextModel, getTtsModel, resolveApiKey } from "./settings";
+import type { AudioNoteMode, AudioTranscribeAndNoteResult } from "./types";
 
 export class GeminiError extends Error {
   status: number;
@@ -28,9 +29,16 @@ function textModels(): string[] {
       "gemini-3.8-flash",
       "gemini-3.7-flash",
       "gemini-3.8-pro",
-      "gemini-2.5-flash",
-      "gemini-1.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
     ]),
+  ];
+}
+
+function transcribeModels(): string[] {
+  return [
+    "gemini-3.5-transcribe",
+    "gemini-3.8-flash",
   ];
 }
 
@@ -47,6 +55,16 @@ function requireKey(explicit?: string | null): string {
 
 function partsText(response: { text?: string | null }): string {
   return (response.text ?? "").trim();
+}
+
+function extractJsonObject(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(trimmed);
+  const body = (fenced ? fenced[1] : trimmed).trim();
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("No JSON object found in model response.");
+  return body.slice(start, end + 1);
 }
 
 async function tryEach<T>(
@@ -148,7 +166,7 @@ export async function transcribeAudio(
     "Transcribe the speech in this audio recording exactly as spoken, in the speaker's language. " +
     "Return only the transcription text with basic sentence punctuation. " +
     "If there is no intelligible speech, reply with an empty string.";
-  return tryEach(textModels(), async (model) => {
+  return tryEach(transcribeModels(), async (model) => {
     const response = await ai.models.generateContent({
       model,
       contents: [
@@ -157,6 +175,139 @@ export async function transcribeAudio(
       ],
     });
     return partsText(response);
+  });
+}
+
+function normalizeAudioNotes(parsed: unknown): AudioTranscribeAndNoteResult {
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Invalid audio transcription JSON response.");
+  }
+  const obj = parsed as Record<string, unknown>;
+  const title =
+    typeof obj.title === "string" && obj.title.trim()
+      ? obj.title.trim().slice(0, 300)
+      : "Audio Recording";
+  const transcript = typeof obj.transcript === "string" ? obj.transcript.trim() : "";
+  const summary = typeof obj.summary === "string" && obj.summary.trim() ? obj.summary.trim() : null;
+  const notes = typeof obj.notes === "string" && obj.notes.trim() ? obj.notes.trim() : null;
+  const actionItems = Array.isArray(obj.actionItems)
+    ? obj.actionItems
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+        .slice(0, 30)
+    : [];
+  const keyPoints = Array.isArray(obj.keyPoints)
+    ? obj.keyPoints
+        .map((item) => String(item).trim())
+        .filter(Boolean)
+        .slice(0, 30)
+    : [];
+
+  return {
+    title,
+    transcript,
+    summary,
+    notes,
+    actionItems,
+    keyPoints,
+  };
+}
+
+/** Transcribe audio and generate structured notes, summary, action items and key points using Gemini. */
+export async function transcribeAndNoteAudio(
+  audioBase64: string,
+  mimeType: string,
+  mode: AudioNoteMode = "notes",
+  explicitKey?: string | null,
+): Promise<AudioTranscribeAndNoteResult> {
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+
+  let modeInstruction = "Analyze this audio recording and generate structured notes.";
+  if (mode === "meeting") {
+    modeInstruction =
+      "Analyze this audio recording as a meeting or discussion. Focus on:\n" +
+      "1) Full verbatim or clean transcription of spoken content;\n" +
+      "2) Executive summary of the meeting;\n" +
+      "3) Structured meeting notes with topics, discussions, and decisions made (formatted with clean Markdown headings and bullet points);\n" +
+      "4) Action items with clear owners/tasks if mentioned;\n" +
+      "5) Key points and takeaways.";
+  } else if (mode === "lecture") {
+    modeInstruction =
+      "Analyze this audio recording as an educational lecture, presentation, or study session. Focus on:\n" +
+      "1) Full accurate transcription of the lecture;\n" +
+      "2) High-level summary of the lecture;\n" +
+      "3) Detailed structured study notes covering concepts, definitions, explanations, and structure (formatted with clean Markdown);\n" +
+      "4) Suggested study/action items or review questions;\n" +
+      "5) Key points and core takeaways.";
+  } else if (mode === "transcript-only") {
+    modeInstruction =
+      "Transcribe this audio recording completely and accurately. Focus on:\n" +
+      "1) Full accurate transcription of all speech in the recording;\n" +
+      "2) A concise, descriptive title;\n" +
+      "3) A brief 1-2 sentence overview in summary;\n" +
+      "4) Core key points if applicable.";
+  } else {
+    // "notes" mode
+    modeInstruction =
+      "Analyze this audio recording or voice memo. Focus on:\n" +
+      "1) Full accurate transcription of the recording;\n" +
+      "2) A descriptive title;\n" +
+      "3) A concise summary;\n" +
+      "4) Comprehensive, well-structured notes (formatted with clean Markdown);\n" +
+      "5) Action items or follow-ups mentioned;\n" +
+      "6) Key bullet takeaways.";
+  }
+
+  const prompt =
+    `${modeInstruction}\n\n` +
+    "Return a valid JSON object matching the requested schema with properties:\n" +
+    '- "title": concise, descriptive title for this recording (string)\n' +
+    '- "transcript": full transcription of all speech in the recording (string)\n' +
+    '- "summary": concise summary paragraph (string)\n' +
+    '- "notes": comprehensive structured notes with markdown formatting (string)\n' +
+    '- "actionItems": array of specific action items or tasks (string[])\n' +
+    '- "keyPoints": array of main takeaways and key points (string[])\n\n' +
+    "If no speech is audible, provide an empty transcript and explain that in the summary.";
+
+  const schema = {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      transcript: { type: "string" },
+      summary: { type: "string" },
+      notes: { type: "string" },
+      actionItems: {
+        type: "array",
+        items: { type: "string" },
+      },
+      keyPoints: {
+        type: "array",
+        items: { type: "string" },
+      },
+    },
+    required: ["title", "transcript", "summary", "notes", "actionItems", "keyPoints"],
+  };
+
+  const models = ["gemini-3.8-flash", "gemini-3.5-transcribe", "gemini-3.7-flash"];
+
+  return tryEach(models, async (model) => {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        { text: prompt },
+        { inlineData: { mimeType, data: audioBase64 } },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema,
+      },
+    } as never);
+
+    const raw = partsText(response);
+    if (!raw) throw new GeminiError(`Model ${model} returned empty response.`);
+    const parsed = JSON.parse(extractJsonObject(raw));
+    return normalizeAudioNotes(parsed);
   });
 }
 
@@ -323,16 +474,6 @@ export interface GeneratedFlashcard {
 export interface GeneratedQuiz {
   questions: GeneratedQuizQuestion[];
   flashcards: GeneratedFlashcard[];
-}
-
-function extractJsonObject(raw: string): string {
-  const trimmed = raw.trim();
-  const fenced = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(trimmed);
-  const body = (fenced ? fenced[1] : trimmed).trim();
-  const start = body.indexOf("{");
-  const end = body.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("No JSON object found in model response.");
-  return body.slice(start, end + 1);
 }
 
 function normalizeQuiz(parsed: unknown): GeneratedQuiz {

@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { dbAll, dbGet, dbRun, getDb, recordTombstone } from "./db";
 import { countWords, splitSentences } from "./text";
 import type {
+  AudioNoteMetadata,
   Bookmark,
   DocumentDetail,
   DocumentSummary,
@@ -35,6 +36,7 @@ interface DocumentRow {
   is_archived: number;
   created_at: string;
   updated_at: string;
+  metadata?: string;
 }
 
 interface SentenceRow {
@@ -86,9 +88,20 @@ export function parseTags(json: string | null): string[] {
   }
 }
 
+export function parseMetadata(json?: string | null): AudioNoteMetadata | null {
+  if (!json) return null;
+  try {
+    const v: unknown = JSON.parse(json);
+    return typeof v === "object" && v !== null ? (v as AudioNoteMetadata) : null;
+  } catch {
+    return null;
+  }
+}
+
 function toSummary(row: DocumentRow & { cached_sentences?: number }): DocumentSummary {
   const cached =
     typeof row.cached_sentences === "number" ? row.cached_sentences : undefined;
+  const audioMeta = parseMetadata(row.metadata);
   return {
     id: row.id,
     title: row.title,
@@ -112,6 +125,8 @@ function toSummary(row: DocumentRow & { cached_sentences?: number }): DocumentSu
     isArchived: row.is_archived === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    originalAudioUrl: audioMeta?.originalAudioUrl ?? null,
+    audioNotes: audioMeta,
   };
 }
 
@@ -168,6 +183,7 @@ function toFolder(row: FolderRow, documentCount?: number): Folder {
 }
 
 export interface CreateDocumentInput {
+  id?: string;
   title?: string;
   text: string;
   sourceType?: SourceType;
@@ -178,6 +194,7 @@ export interface CreateDocumentInput {
   speed?: number;
   folderId?: string | null;
   tags?: string[];
+  metadata?: AudioNoteMetadata | Record<string, unknown> | null;
 }
 
 export function createDocument(input: CreateDocumentInput): DocumentSummary {
@@ -189,7 +206,7 @@ export function createDocument(input: CreateDocumentInput): DocumentSummary {
   const sentences = splitSentences(text);
   if (sentences.length === 0) throw new Error("No readable sentences found.");
 
-  const id = randomUUID();
+  const id = input.id?.trim() || randomUUID();
   const ts = nowIso();
   const title = input.title?.trim().slice(0, 300) || "Untitled";
   const voice =
@@ -199,9 +216,18 @@ export function createDocument(input: CreateDocumentInput): DocumentSummary {
       ? Math.min(4.5, Math.max(0.5, input.speed))
       : getDefaultSpeed();
 
+  const metaObj: AudioNoteMetadata = input.metadata ? { ...input.metadata } : {};
+  if (
+    (input.sourceType === "audio-recording" || input.sourceType === "voice-note") &&
+    !metaObj.originalAudioUrl
+  ) {
+    metaObj.originalAudioUrl = `/api/documents/${id}/recording`;
+  }
+  const metadataJson = JSON.stringify(metaObj);
+
   dbRun(
-    `INSERT INTO documents (id, title, author, source_type, source_url, full_text, total_chars, word_count, sentence_count, voice, style_prompt, speed, folder_id, tags, progress_sentence_index, progress_char_offset, progress_updated_at, is_archived, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, 0, ?, ?)`,
+    `INSERT INTO documents (id, title, author, source_type, source_url, full_text, total_chars, word_count, sentence_count, voice, style_prompt, speed, folder_id, tags, progress_sentence_index, progress_char_offset, progress_updated_at, is_archived, created_at, updated_at, metadata)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, 0, ?, ?, ?)`,
     id,
     title,
     input.author?.trim().slice(0, 300) || null,
@@ -218,6 +244,7 @@ export function createDocument(input: CreateDocumentInput): DocumentSummary {
     JSON.stringify((input.tags || []).filter(Boolean).slice(0, 20)),
     ts,
     ts,
+    metadataJson,
   );
 
   const stmt = getDb().prepare(
@@ -316,6 +343,7 @@ export interface UpdateDocumentPatch {
   progressSentenceIndex?: number;
   progressCharOffset?: number;
   isArchived?: boolean;
+  metadata?: AudioNoteMetadata | Record<string, unknown> | null;
 }
 
 export function updateDocument(
@@ -377,6 +405,11 @@ export function updateDocument(
     params.push(patch.isArchived ? 1 : 0);
     touchUpdated = true;
   }
+  if (patch.metadata !== undefined) {
+    sets.push("metadata = ?");
+    params.push(JSON.stringify(patch.metadata || {}));
+    touchUpdated = true;
+  }
   if (
     patch.progressSentenceIndex !== undefined ||
     patch.progressCharOffset !== undefined
@@ -402,6 +435,17 @@ export function updateDocument(
   dbRun(`UPDATE documents SET ${sets.join(", ")} WHERE id = ?`, ...params);
   const updated = dbGet<DocumentRow>("SELECT * FROM documents WHERE id = ?", id);
   return updated ? toSummary(updated) : null;
+}
+
+export function updateDocumentMetadata(
+  id: string,
+  metadataPatch: Partial<AudioNoteMetadata>,
+): DocumentSummary | null {
+  const existing = dbGet<DocumentRow>("SELECT * FROM documents WHERE id = ?", id);
+  if (!existing) return null;
+  const current = parseMetadata(existing.metadata) || {};
+  const updated = { ...current, ...metadataPatch };
+  return updateDocument(id, { metadata: updated });
 }
 
 export function deleteDocument(id: string): boolean {

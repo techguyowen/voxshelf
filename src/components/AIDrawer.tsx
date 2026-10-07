@@ -4,18 +4,22 @@ import {
   Bookmark as BookmarkIcon,
   Check,
   CheckCircle2,
+  CheckSquare,
   ChevronLeft,
   ChevronRight,
   Copy,
   Download,
   Edit2,
   FileDown,
+  FileText,
   Highlighter,
+  ListTodo,
   Loader2,
   Mic,
   RotateCcw,
   Send,
   Sparkles,
+  Square,
   Trash2,
   Volume2,
   X,
@@ -35,7 +39,7 @@ import type {
 } from "@/lib/types";
 import { formatDuration } from "@/lib/text";
 
-type DrawerTab = "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" | "highlights";
+export type DrawerTab = "notes" | "summary" | "explain" | "chat" | "quiz" | "cards" | "podcast" | "bookmarks" | "highlights";
 
 const HIGHLIGHT_BADGE: Record<string, string> = {
   yellow: "bg-yellow-300 dark:bg-yellow-500",
@@ -85,7 +89,7 @@ export function AIDrawer({
   onUpdateHighlight?: (id: string, patch: { note?: string | null; color?: HighlightColor }) => void;
   initialTab?: DrawerTab;
 }) {
-  const [tab, setTab] = useState<DrawerTab>(initialTab || "summary");
+  const [tab, setTab] = useState<DrawerTab>(initialTab || (doc.audioNotes ? "notes" : "summary"));
   const [summary, setSummary] = useState("");
   const [summaryLen, setSummaryLen] = useState<"short" | "detailed">("short");
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -93,6 +97,111 @@ export function AIDrawer({
   const [explainBusy, setExplainBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState("");
+
+  // Notes state
+  const [checkedActions, setCheckedActions] = useState<Record<number, boolean>>({});
+  const [generatedNotes, setGeneratedNotes] = useState<{
+    summary?: string | null;
+    notes?: string | null;
+    keyPoints?: string[] | null;
+    actionItems?: string[] | null;
+  } | null>(null);
+  const [notesBusy, setNotesBusy] = useState(false);
+
+  const effectiveNotes = doc.audioNotes || generatedNotes;
+
+  async function generateNotes() {
+    setNotesBusy(true);
+    setError(null);
+    try {
+      const summaryText = await api.summarize({ documentId: doc.id, length: "detailed" });
+      const prompt =
+        "Extract 4-6 concise key takeaways and 3-5 concrete action items or practical takeaways from this document. " +
+        "Format as Markdown with headings '### Key Points' and '### Action Items' followed by bullet lists.";
+      const chatRes = await api.chat({
+        documentId: doc.id,
+        userQuestion: prompt,
+      });
+
+      const lines = chatRes.answer.split("\n");
+      const keyPoints: string[] = [];
+      const actionItems: string[] = [];
+      let currentSection: "keys" | "actions" | "none" = "none";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (/key\s*points/i.test(trimmed)) {
+          currentSection = "keys";
+          continue;
+        } else if (/action\s*items|next\s*steps|tasks/i.test(trimmed)) {
+          currentSection = "actions";
+          continue;
+        }
+        if (/^[-*•\d.]+\s+/.test(trimmed)) {
+          const item = trimmed.replace(/^[-*•\d.]+\s+/, "").trim();
+          if (item) {
+            if (currentSection === "actions") actionItems.push(item);
+            else keyPoints.push(item);
+          }
+        }
+      }
+
+      setGeneratedNotes({
+        summary: summaryText.summary,
+        notes: chatRes.answer,
+        keyPoints: keyPoints.length > 0 ? keyPoints : [
+          "Core arguments and insights from the document",
+          "Synthesized key ideas generated with Gemini",
+        ],
+        actionItems: actionItems.length > 0 ? actionItems : [
+          "Review summary and core ideas",
+          "Apply takeaways to study or work",
+        ],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to generate notes.");
+    } finally {
+      setNotesBusy(false);
+    }
+  }
+
+  function copyNotes() {
+    if (!effectiveNotes) return;
+    const parts: string[] = [`# ${doc.title} - Notes\n`];
+    if (effectiveNotes.summary) {
+      parts.push(`## Summary\n${effectiveNotes.summary}\n`);
+    }
+    if (effectiveNotes.keyPoints && effectiveNotes.keyPoints.length > 0) {
+      parts.push(`## Key Points\n` + effectiveNotes.keyPoints.map((p) => `- ${p}`).join("\n") + "\n");
+    }
+    if (effectiveNotes.actionItems && effectiveNotes.actionItems.length > 0) {
+      parts.push(`## Action Items\n` + effectiveNotes.actionItems.map((a, i) => `- [${checkedActions[i] ? "x" : " "}] ${a}`).join("\n") + "\n");
+    }
+    if (effectiveNotes.notes) {
+      parts.push(`## Detailed Notes\n${effectiveNotes.notes}\n`);
+    }
+    navigator.clipboard.writeText(parts.join("\n"));
+    toast.success("Notes copied to clipboard!");
+  }
+
+  function exportNotes() {
+    if (!effectiveNotes) return;
+    const parts: string[] = [`# ${doc.title} - Notes\n`];
+    if (effectiveNotes.summary) {
+      parts.push(`## Summary\n${effectiveNotes.summary}\n`);
+    }
+    if (effectiveNotes.keyPoints && effectiveNotes.keyPoints.length > 0) {
+      parts.push(`## Key Points\n` + effectiveNotes.keyPoints.map((p) => `- ${p}`).join("\n") + "\n");
+    }
+    if (effectiveNotes.actionItems && effectiveNotes.actionItems.length > 0) {
+      parts.push(`## Action Items\n` + effectiveNotes.actionItems.map((a, i) => `- [${checkedActions[i] ? "x" : " "}] ${a}`).join("\n") + "\n");
+    }
+    if (effectiveNotes.notes) {
+      parts.push(`## Detailed Notes\n${effectiveNotes.notes}\n`);
+    }
+    downloadTextFile(safeFilename(`${doc.title}_notes`, "md"), parts.join("\n"), "text/markdown");
+    toast.success("Exported notes to file!");
+  }
 
   // Chat state
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -485,6 +594,7 @@ export function AIDrawer({
   if (!open) return null;
 
   const tabs: { id: DrawerTab; label: string }[] = [
+    { id: "notes", label: doc.audioNotes ? "Notes ✨" : "Notes" },
     { id: "summary", label: "Summary" },
     { id: "explain", label: "Explain" },
     { id: "chat", label: "Chat" },
@@ -558,6 +668,178 @@ export function AIDrawer({
           {error && (
             <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-300">
               {error}
+            </div>
+          )}
+
+          {tab === "notes" && (
+            <div className="space-y-4">
+              {effectiveNotes ? (
+                <>
+                  {/* Top Bar with Mode badge and Action Buttons */}
+                  <div className="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
+                    <div className="flex items-center gap-1.5">
+                      <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                        {doc.audioNotes?.mode === "meeting"
+                          ? "💼 Meeting Notes"
+                          : doc.audioNotes?.mode === "lecture"
+                          ? "🎓 Lecture Notes"
+                          : doc.audioNotes?.mode === "transcript-only"
+                          ? "📜 Transcript Notes"
+                          : "📝 Structured Notes"}
+                      </span>
+                      {doc.originalAudioUrl && (
+                        <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+                          🎙️ Audio grounded
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={copyNotes}
+                        className="flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        title="Copy All Notes"
+                      >
+                        <Copy size={13} />
+                        Copy
+                      </button>
+                      <button
+                        onClick={exportNotes}
+                        className="flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                        title="Export Markdown"
+                      >
+                        <FileDown size={13} />
+                        Export
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Summary Section */}
+                  {effectiveNotes.summary && (
+                    <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-3.5 dark:border-zinc-800 dark:bg-zinc-800/40">
+                      <div className="mb-1.5 flex items-center justify-between font-semibold text-xs text-zinc-700 dark:text-zinc-300">
+                        <span>Executive Summary</span>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(effectiveNotes.summary || "");
+                            toast.success("Summary copied!");
+                          }}
+                          className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                          title="Copy summary"
+                        >
+                          <Copy size={12} />
+                        </button>
+                      </div>
+                      <p className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+                        {effectiveNotes.summary}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Key Points Section */}
+                  {effectiveNotes.keyPoints && effectiveNotes.keyPoints.length > 0 && (
+                    <div className="space-y-2">
+                      <h3 className="font-semibold text-xs tracking-wider uppercase text-zinc-500 dark:text-zinc-400">
+                        Key Points ({effectiveNotes.keyPoints.length})
+                      </h3>
+                      <ul className="space-y-1.5">
+                        {effectiveNotes.keyPoints.map((point, i) => (
+                          <li
+                            key={i}
+                            className="flex items-start gap-2 rounded-lg bg-zinc-50 p-2.5 text-xs text-zinc-700 dark:bg-zinc-800/50 dark:text-zinc-300"
+                          >
+                            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-100 font-bold text-[10px] text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                              {i + 1}
+                            </span>
+                            <span className="leading-relaxed">{point}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Action Items Section */}
+                  {effectiveNotes.actionItems && effectiveNotes.actionItems.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="flex items-center gap-1.5 font-semibold text-xs tracking-wider uppercase text-zinc-500 dark:text-zinc-400">
+                          <ListTodo size={14} className="text-emerald-600 dark:text-emerald-400" />
+                          Action Items ({effectiveNotes.actionItems.length})
+                        </h3>
+                        <span className="text-[10px] text-zinc-400">
+                          {Object.values(checkedActions).filter(Boolean).length} / {effectiveNotes.actionItems.length} done
+                        </span>
+                      </div>
+                      <div className="space-y-1.5">
+                        {effectiveNotes.actionItems.map((action, i) => {
+                          const isDone = !!checkedActions[i];
+                          return (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setCheckedActions((prev) => ({ ...prev, [i]: !prev[i] }))}
+                              className={`flex w-full items-start gap-2.5 rounded-lg border p-2.5 text-left text-xs transition ${
+                                isDone
+                                  ? "border-emerald-200 bg-emerald-50/40 text-zinc-400 line-through dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-zinc-500"
+                                  : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                              }`}
+                            >
+                              <span className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400">
+                                {isDone ? <CheckSquare size={14} /> : <Square size={14} />}
+                              </span>
+                              <span className="leading-relaxed">{action}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Detailed Notes / Outline */}
+                  {effectiveNotes.notes && (
+                    <div className="space-y-1.5">
+                      <h3 className="font-semibold text-xs tracking-wider uppercase text-zinc-500 dark:text-zinc-400">
+                        Detailed Notes & Outline
+                      </h3>
+                      <div className="whitespace-pre-wrap rounded-xl bg-zinc-50 p-3.5 text-xs leading-relaxed text-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-300">
+                        {effectiveNotes.notes}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* No Notes Yet State */
+                <div className="space-y-3 py-6 text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400">
+                    <FileText size={24} />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm text-zinc-800 dark:text-zinc-200">
+                      No Structured Notes Yet
+                    </h3>
+                    <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Generate a comprehensive summary, key points, and action items with Gemini.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void generateNotes()}
+                    disabled={notesBusy}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+                  >
+                    {notesBusy ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Generating Structured Notes…
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={14} />
+                        Generate Structured Notes with Gemini
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

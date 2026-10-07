@@ -1,29 +1,41 @@
 "use client";
 
 import {
+  BookOpen,
+  Briefcase,
   Camera,
+  CheckCircle2,
   ClipboardPaste,
+  FileAudio,
+  FileText,
   FileUp,
   Globe,
+  GraduationCap,
   Image as ImageIcon,
   Link2,
   Loader2,
   Mic,
+  Pause,
+  Play,
+  Radio,
+  RotateCcw,
   ScanLine,
   Sparkles,
   Square,
   TriangleAlert,
+  Volume2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { ApiError, api } from "@/lib/client";
-import type { ExtractResult, SourceType } from "@/lib/types";
+import { ApiError, api, formatBytes } from "@/lib/client";
+import type { AudioNoteMode, ExtractResult, SourceType } from "@/lib/types";
 import { countWords } from "@/lib/text";
 import { Modal } from "./Modal";
 
-type Tab = "upload" | "scan" | "gdocs" | "article" | "paste";
+type Tab = "audio" | "upload" | "scan" | "gdocs" | "article" | "paste";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: "audio", label: "Voice & Audio", icon: <Mic size={16} /> },
   { id: "upload", label: "Upload", icon: <FileUp size={16} /> },
   { id: "scan", label: "Scan / OCR", icon: <ScanLine size={16} /> },
   { id: "gdocs", label: "Google Docs", icon: <Link2 size={16} /> },
@@ -113,6 +125,660 @@ function ExtractPreview({
       >
         {saving && <Loader2 size={15} className="animate-spin" />}
         Save to library & start reading
+      </button>
+    </div>
+  );
+}
+
+// Minimal Web Speech API shapes (not in TS DOM lib).
+interface SpeechRecognitionAlternative {
+  transcript: string;
+}
+interface SpeechRecognitionResultItem {
+  isFinal: boolean;
+  0: SpeechRecognitionAlternative;
+  length: number;
+}
+interface SpeechRecognitionResultEventLike {
+  resultIndex: number;
+  results: ArrayLike<SpeechRecognitionResultItem>;
+}
+interface SpeechRecognitionLike {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((e: SpeechRecognitionResultEventLike) => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
+
+function speechRecognitionCtor(): SpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+}
+
+const AUDIO_NOTE_MODES: {
+  id: AudioNoteMode;
+  label: string;
+  desc: string;
+  icon: React.ReactNode;
+}[] = [
+  {
+    id: "meeting",
+    label: "Meeting Notes",
+    desc: "Action items, decisions & attendee takeaways",
+    icon: <Briefcase size={15} />,
+  },
+  {
+    id: "lecture",
+    label: "Lecture & Study",
+    desc: "Core concepts, definitions, study notes & review questions",
+    icon: <GraduationCap size={15} />,
+  },
+  {
+    id: "notes",
+    label: "Voice Memo / Notes",
+    desc: "Executive summary, comprehensive takeaways & key points",
+    icon: <FileText size={15} />,
+  },
+  {
+    id: "transcript-only",
+    label: "Full Transcript",
+    desc: "Verbatim speech-to-text transcription",
+    icon: <BookOpen size={15} />,
+  },
+];
+
+function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
+  const [subMode, setSubMode] = useState<"record" | "upload">("record");
+  const [noteMode, setNoteMode] = useState<AudioNoteMode>("meeting");
+  const [title, setTitle] = useState("");
+  const [tags, setTags] = useState("");
+
+  // Recording state
+  const [recordingState, setRecordingState] = useState<"idle" | "recording" | "paused" | "recorded">("idle");
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+  const [interimText, setInterimText] = useState("");
+
+  // Upload file state
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadAudioUrl, setUploadAudioUrl] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  // Status & submission
+  const [busy, setBusy] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const animFrameRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const startVisualizer = (stream: MediaStream) => {
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      audioContextRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      const source = ctx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const bufferLen = analyser.frequencyBinCount;
+      const dataArr = new Uint8Array(bufferLen);
+
+      const draw = () => {
+        if (!canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const cCtx = canvas.getContext("2d");
+        if (!cCtx) return;
+
+        analyser.getByteFrequencyData(dataArr);
+        cCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const barWidth = (canvas.width / bufferLen) * 1.35;
+        let x = 0;
+
+        for (let i = 0; i < bufferLen; i++) {
+          const barHeight = Math.max(3, (dataArr[i] / 255) * canvas.height * 0.9);
+          const grad = cCtx.createLinearGradient(0, canvas.height, 0, 0);
+          grad.addColorStop(0, "#10b981");
+          grad.addColorStop(1, "#06b6d4");
+
+          cCtx.fillStyle = grad;
+          cCtx.beginPath();
+          cCtx.roundRect(x, canvas.height - barHeight, Math.max(barWidth - 2, 2), barHeight, 2);
+          cCtx.fill();
+
+          x += barWidth + 2;
+        }
+
+        animFrameRef.current = requestAnimationFrame(draw);
+      };
+      draw();
+    } catch {
+      // Audio visualizer non-fatal
+    }
+  };
+
+  const stopVisualizer = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      void audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+  };
+
+  const startRecognition = () => {
+    const Ctor = speechRecognitionCtor();
+    if (!Ctor) return;
+    try {
+      const rec = new Ctor();
+      recognitionRef.current = rec;
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = navigator.language || "en-US";
+      rec.onresult = (e) => {
+        let acc = "";
+        for (let i = Math.max(0, e.results.length - 2); i < e.results.length; i++) {
+          acc += e.results[i][0].transcript + " ";
+        }
+        setInterimText(acc.trim());
+      };
+      rec.start();
+    } catch {
+      // speech recognition optional
+    }
+  };
+
+  const stopRecognition = () => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    }
+  };
+
+  async function startRecording() {
+    setError(null);
+    setInterimText("");
+    setRecordedBlob(null);
+    if (recordedAudioUrl) {
+      URL.revokeObjectURL(recordedAudioUrl);
+      setRecordedAudioUrl(null);
+    }
+    audioChunksRef.current = [];
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      const types = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
+      const supported = types.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+
+      const recorder = supported ? new MediaRecorder(stream, { mimeType: supported }) : new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const mime = recorder.mimeType || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type: mime });
+        setRecordedBlob(blob);
+        const url = URL.createObjectURL(blob);
+        setRecordedAudioUrl(url);
+        stopVisualizer();
+        stopRecognition();
+      };
+
+      recorder.start(500);
+      setRecordingState("recording");
+      setRecordSeconds(0);
+
+      timerIntervalRef.current = setInterval(() => {
+        setRecordSeconds((s) => s + 1);
+      }, 1000);
+
+      startVisualizer(stream);
+      startRecognition();
+    } catch (err) {
+      setError(
+        err instanceof Error && err.name === "NotAllowedError"
+          ? "Microphone access was denied. Please allow microphone permissions in your browser."
+          : "Could not access microphone."
+      );
+      setRecordingState("idle");
+    }
+  }
+
+  function pauseRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.pause();
+      setRecordingState("paused");
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    }
+  }
+
+  function resumeRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
+      mediaRecorderRef.current.resume();
+      setRecordingState("recording");
+      timerIntervalRef.current = setInterval(() => {
+        setRecordSeconds((s) => s + 1);
+      }, 1000);
+    }
+  }
+
+  function stopRecording() {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setRecordingState("recorded");
+  }
+
+  function handleFileSelected(file: File) {
+    if (!file) return;
+    setError(null);
+    setUploadFile(file);
+    if (uploadAudioUrl) URL.revokeObjectURL(uploadAudioUrl);
+    const url = URL.createObjectURL(file);
+    setUploadAudioUrl(url);
+    if (!title) {
+      setTitle(file.name.replace(/\.[^/.]+$/, ""));
+    }
+  }
+
+  async function handleSubmit() {
+    const audioTarget = subMode === "record" ? recordedBlob : uploadFile;
+    if (!audioTarget) {
+      setError(subMode === "record" ? "Record some audio first." : "Select an audio file first.");
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setStatusMessage("Uploading audio recording...");
+
+    try {
+      const form = new FormData();
+      const filename =
+        subMode === "record"
+          ? `live_recording_${Date.now()}.webm`
+          : uploadFile?.name || "recording.mp3";
+
+      form.append("file", audioTarget, filename);
+      form.append("mode", noteMode);
+      if (title.trim()) form.append("title", title.trim());
+      if (tags.trim()) form.append("tags", tags.trim());
+      form.append("recordedLive", subMode === "record" ? "1" : "0");
+      form.append("saveDocument", "1");
+      if (subMode === "record" && recordSeconds > 0) {
+        form.append("durationMs", String(recordSeconds * 1000));
+      }
+
+      setStatusMessage("Transcribing speech and extracting notes with Gemini 3...");
+      const res = await api.transcribeAndNote(form);
+
+      if (res.document?.id) {
+        onSaved(res.document.id);
+      } else {
+        throw new Error("Document was not created.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to transcribe audio.");
+      setBusy(false);
+      setStatusMessage(null);
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+      stopVisualizer();
+      stopRecognition();
+      if (recordedAudioUrl) URL.revokeObjectURL(recordedAudioUrl);
+      if (uploadAudioUrl) URL.revokeObjectURL(uploadAudioUrl);
+    };
+  }, [recordedAudioUrl, uploadAudioUrl]);
+
+  const formatTimer = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Submode Switcher: Record Live vs Upload */}
+      <div className="grid grid-cols-2 gap-2 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800/80">
+        <button
+          type="button"
+          onClick={() => {
+            setSubMode("record");
+            setError(null);
+          }}
+          className={`flex items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold transition ${
+            subMode === "record"
+              ? "bg-white text-emerald-700 shadow dark:bg-zinc-900 dark:text-emerald-400"
+              : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+          }`}
+        >
+          <Mic size={15} />
+          Record Live
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setSubMode("upload");
+            setError(null);
+          }}
+          className={`flex items-center justify-center gap-2 rounded-lg py-2 text-xs font-semibold transition ${
+            subMode === "upload"
+              ? "bg-white text-emerald-700 shadow dark:bg-zinc-900 dark:text-emerald-400"
+              : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+          }`}
+        >
+          <FileAudio size={15} />
+          Upload Recording
+        </button>
+      </div>
+
+      {/* Note-Taking Mode Selector */}
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-zinc-500 dark:text-zinc-400">
+          Note-Taking Style
+        </label>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {AUDIO_NOTE_MODES.map((m) => {
+            const active = noteMode === m.id;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => setNoteMode(m.id)}
+                className={`flex flex-col items-start rounded-xl border p-2.5 text-left transition ${
+                  active
+                    ? "border-emerald-500 bg-emerald-50/70 text-emerald-900 ring-1 ring-emerald-500 dark:border-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-200"
+                    : "border-zinc-200 hover:border-zinc-300 dark:border-zinc-800 dark:hover:border-zinc-700"
+                }`}
+              >
+                <div className="mb-1 flex items-center gap-1.5 font-medium text-xs">
+                  {m.icon}
+                  <span>{m.label}</span>
+                </div>
+                <span className="line-clamp-2 text-[10px] leading-tight text-zinc-500 dark:text-zinc-400">
+                  {m.desc}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Mode-specific Recording or Upload Box */}
+      {subMode === "record" ? (
+        <div className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800">
+          {recordingState === "idle" && (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <button
+                type="button"
+                onClick={() => void startRecording()}
+                className="group relative flex h-20 w-20 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg transition hover:bg-emerald-700 hover:scale-105 active:scale-95 dark:bg-emerald-500 dark:text-zinc-950"
+              >
+                <span className="absolute -inset-1 animate-ping rounded-full bg-emerald-400/40" />
+                <Mic size={32} className="relative z-10" />
+              </button>
+              <h3 className="mt-4 font-semibold text-sm text-zinc-800 dark:text-zinc-200">
+                Click to Start Recording
+              </h3>
+              <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                Speak naturally. Audio is recorded live and transcribed with Gemini.
+              </p>
+            </div>
+          )}
+
+          {(recordingState === "recording" || recordingState === "paused") && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-block h-3 w-3 rounded-full ${
+                      recordingState === "recording"
+                        ? "animate-pulse bg-red-500"
+                        : "bg-amber-500"
+                    }`}
+                  />
+                  <span className="font-mono font-bold text-sm text-zinc-800 dark:text-zinc-200">
+                    {formatTimer(recordSeconds)}
+                  </span>
+                  <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                    {recordingState === "recording" ? "Recording Live" : "Paused"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {recordingState === "recording" ? (
+                    <button
+                      type="button"
+                      onClick={pauseRecording}
+                      className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      <Pause size={13} /> Pause
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={resumeRecording}
+                      className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+                    >
+                      <Play size={13} /> Resume
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={stopRecording}
+                    className="flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950"
+                  >
+                    <Square size={13} /> Finish Recording
+                  </button>
+                </div>
+              </div>
+
+              {/* Waveform Canvas */}
+              <canvas
+                ref={canvasRef}
+                width={480}
+                height={64}
+                className="h-16 w-full rounded-xl bg-zinc-950"
+              />
+
+              {/* Live interim preview if speech recognition available */}
+              {interimText && (
+                <div className="rounded-lg bg-zinc-50 p-2.5 text-xs text-zinc-600 dark:bg-zinc-900/60 dark:text-zinc-300">
+                  <div className="mb-0.5 flex items-center gap-1 font-semibold text-[10px] text-emerald-600 dark:text-emerald-400">
+                    <Radio size={11} className="animate-pulse" /> Live Speech Preview
+                  </div>
+                  <p className="italic">“{interimText}”</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {recordingState === "recorded" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400" />
+                  <span className="font-semibold text-xs text-zinc-800 dark:text-zinc-200">
+                    Recording Complete ({formatTimer(recordSeconds)})
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRecordingState("idle");
+                    setRecordSeconds(0);
+                    setRecordedBlob(null);
+                    setInterimText("");
+                    if (recordedAudioUrl) {
+                      URL.revokeObjectURL(recordedAudioUrl);
+                      setRecordedAudioUrl(null);
+                    }
+                  }}
+                  className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                  <RotateCcw size={12} /> Re-record
+                </button>
+              </div>
+
+              {recordedAudioUrl && (
+                <audio
+                  controls
+                  src={recordedAudioUrl}
+                  className="h-9 w-full rounded-lg"
+                />
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* Upload Recording Submode */
+        <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const file = e.dataTransfer.files?.[0];
+            if (file) handleFileSelected(file);
+          }}
+          onClick={() => fileInputRef.current?.click()}
+          className={`cursor-pointer rounded-xl border-2 border-dashed p-6 text-center transition ${
+            dragOver
+              ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20"
+              : "border-zinc-300 hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-600"
+          }`}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".mp3,.wav,.m4a,.ogg,.webm,.flac,.aac,audio/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleFileSelected(file);
+            }}
+          />
+
+          {uploadFile ? (
+            <div className="space-y-2">
+              <div className="flex items-center justify-center gap-2 text-emerald-600 dark:text-emerald-400">
+                <FileAudio size={24} />
+                <span className="font-semibold text-sm">{uploadFile.name}</span>
+                <span className="text-xs text-zinc-400">
+                  ({formatBytes(uploadFile.size)})
+                </span>
+              </div>
+              {uploadAudioUrl && (
+                <div onClick={(e) => e.stopPropagation()} className="pt-2">
+                  <audio controls src={uploadAudioUrl} className="mx-auto h-9 w-full max-w-md" />
+                </div>
+              )}
+              <p className="text-[11px] text-zinc-500">Click or drop another file to change</p>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <FileAudio size={32} className="mx-auto text-zinc-400" />
+              <p className="font-medium text-xs text-zinc-700 dark:text-zinc-300">
+                Drag and drop audio file, or click to browse
+              </p>
+              <p className="text-[11px] text-zinc-400">
+                Supports MP3, WAV, M4A, AAC, FLAC, OGG, WebM
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Document Details: Title & Tags */}
+      <div className="space-y-2">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className={inputCls}
+          placeholder="Title (optional — Gemini will auto-generate one if empty)"
+          aria-label="Document Title"
+        />
+        <input
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+          className={inputCls}
+          placeholder="Tags (comma-separated, e.g. meeting, standup, chemistry)"
+          aria-label="Tags"
+        />
+      </div>
+
+      <ErrorBox message={error} />
+
+      {/* Submit Button */}
+      <button
+        type="button"
+        onClick={handleSubmit}
+        disabled={busy || (subMode === "record" ? !recordedBlob : !uploadFile)}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+      >
+        {busy ? (
+          <>
+            <Loader2 size={16} className="animate-spin" />
+            <span>{statusMessage || "Processing audio with Gemini..."}</span>
+          </>
+        ) : (
+          <>
+            <Sparkles size={16} />
+            <span>Transcribe & Generate Notes with Gemini</span>
+          </>
+        )}
       </button>
     </div>
   );
@@ -528,41 +1194,6 @@ function UrlTab({
   );
 }
 
-// Minimal Web Speech API shapes (not in TS DOM lib).
-interface SpeechRecognitionAlternative {
-  transcript: string;
-}
-interface SpeechRecognitionResultItem {
-  isFinal: boolean;
-  0: SpeechRecognitionAlternative;
-  length: number;
-}
-interface SpeechRecognitionResultEventLike {
-  resultIndex: number;
-  results: ArrayLike<SpeechRecognitionResultItem>;
-}
-interface SpeechRecognitionLike {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  maxAlternatives: number;
-  onresult: ((e: SpeechRecognitionResultEventLike) => void) | null;
-  onerror: ((e: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-}
-type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
-
-function speechRecognitionCtor(): SpeechRecognitionCtor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: SpeechRecognitionCtor;
-    webkitSpeechRecognition?: SpeechRecognitionCtor;
-  };
-  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
-}
-
 function PasteTab({ onSaved }: { onSaved: (id: string) => void }) {
   const [title, setTitle] = useState("");
   const [text, setText] = useState("");
@@ -890,6 +1521,7 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
           </button>
         ))}
       </div>
+      {tab === "audio" && <AudioTab onSaved={onSaved} />}
       {tab === "upload" && <UploadTab onSaved={onSaved} />}
       {tab === "scan" && <ScanTab onSaved={onSaved} />}
       {tab === "gdocs" && <UrlTab kind="gdocs" onSaved={onSaved} />}

@@ -10,7 +10,34 @@ export type SourceType =
   | "file-image"
   | "camera"
   | "url-article"
-  | "url-gdocs";
+  | "url-gdocs"
+  | "audio-recording"
+  | "voice-note";
+
+export type AudioNoteMode = "transcript-only" | "notes" | "meeting" | "lecture";
+
+export interface AudioNoteMetadata {
+  originalAudioUrl?: string | null;
+  originalAudioPath?: string | null;
+  originalFilename?: string | null;
+  mimeType?: string | null;
+  durationMs?: number | null;
+  mode?: AudioNoteMode;
+  summary?: string | null;
+  notes?: string | null;
+  actionItems?: string[] | null;
+  keyPoints?: string[] | null;
+  recordedLive?: boolean;
+}
+
+export interface AudioTranscribeAndNoteResult {
+  title: string;
+  transcript: string;
+  summary?: string | null;
+  notes?: string | null;
+  actionItems?: string[];
+  keyPoints?: string[];
+}
 
 export interface Sentence {
   idx: number;
@@ -71,6 +98,8 @@ export interface DocumentSummary {
   isArchived: boolean;
   createdAt: string;
   updatedAt: string;
+  originalAudioUrl?: string | null;
+  audioNotes?: AudioNoteMetadata | null;
 }
 
 export interface DocumentDetail extends DocumentSummary {

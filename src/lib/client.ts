@@ -1,6 +1,7 @@
 // Client-side API helpers (fetch wrappers) + small formatters.
 
 import type {
+  AudioTranscribeAndNoteResult,
   AuthStatus,
   Bookmark,
   CacheStats,
@@ -211,6 +212,14 @@ export const api = {
     const res = await fetch("/api/ai/transcribe", { method: "POST", body: form });
     return parse<{ text: string }>(res);
   },
+  transcribeAndNote: async (formData: FormData) => {
+    const res = await fetch("/api/audio/transcribe-note", {
+      method: "POST",
+      body: formData,
+    });
+    return parse<{ document: DocumentSummary; result: AudioTranscribeAndNoteResult }>(res);
+  },
+  getDocumentRecordingUrl: (docId: string) => `/api/documents/${docId}/recording`,
   chat: (input: { documentId: string; messages?: ChatMessage[]; userQuestion: string }) =>
     send<{ answer: string }>("/api/ai/chat", "POST", input),
   quiz: (input: { documentId: string }) =>
