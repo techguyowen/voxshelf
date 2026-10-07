@@ -7,9 +7,9 @@
   "desktopName": "app.voxshelf",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "next dev -p 38492",
+    "dev": "next dev -p 48291",
     "build": "next build",
-    "start": "next start -p 38492",
+    "start": "next start -p 48291",
     "typecheck": "tsc --noEmit",
     "desktop:dev": "electron .",
     "desktop:icons": "node scripts/make-icons.mjs",

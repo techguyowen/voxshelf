@@ -18,7 +18,7 @@ git clone https://github.com/<you>/voxshelf.git
 cd voxshelf
 npm install
 cp .env.example .env   # add your GEMINI_API_KEY
-npm run dev            # serves on http://localhost:38492
+npm run dev            # serves on http://localhost:48291
 ```
 
 On first run a `./data` directory is created holding `voxshelf.db` (SQLite)
@@ -29,7 +29,7 @@ Useful commands:
 
 | Command            | Purpose                              |
 | ------------------ | ------------------------------------ |
-| `npm run dev`      | Start the dev server on port `38492` |
+| `npm run dev`      | Start the dev server on port `48291` |
 | `npm run typecheck`| TypeScript check (`tsc --noEmit`)    |
 | `npm run build`    | Production build                     |
 | `npm start`        | Serve the production build           |

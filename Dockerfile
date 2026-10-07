@@ -23,7 +23,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
   NEXT_TELEMETRY_DISABLED=1 \
   DATA_DIR=/app/data \
-  PORT=38492 \
+  PORT=48291 \
   HOSTNAME=0.0.0.0
 
 RUN addgroup --system --gid 1001 nodejs \
@@ -41,8 +41,8 @@ LABEL org.opencontainers.image.title="VoxShelf" \
   org.opencontainers.image.description="Self-hostable text-to-speech app powered by Gemini speech generation" \
   org.opencontainers.image.licenses="MIT"
 
-EXPOSE 38492
+EXPOSE 48291
 VOLUME /app/data
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||38492)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||48291)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "server.js"]

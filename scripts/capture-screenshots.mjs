@@ -98,13 +98,13 @@ async function capture(url, filename, { width = 1280, height = 850, deviceScaleF
 
 try {
   // 1. Library screenshot
-  await capture('http://127.0.0.1:38492', 'library.png', { width: 1280, height: 850, waitMs: 2500 });
+  await capture('http://127.0.0.1:48291', 'library.png', { width: 1280, height: 850, waitMs: 2500 });
 
   // 2. Reader view screenshot
-  await capture('http://127.0.0.1:38492/reader/fac732a6-a40c-49d2-be21-d2339e7acaab', 'reader.png', { width: 1280, height: 850, waitMs: 2500 });
+  await capture('http://127.0.0.1:48291/reader/fac732a6-a40c-49d2-be21-d2339e7acaab', 'reader.png', { width: 1280, height: 850, waitMs: 2500 });
 
   // 3. AI Assistant drawer screenshot
-  await capture('http://127.0.0.1:38492/reader/fac732a6-a40c-49d2-be21-d2339e7acaab', 'ai-drawer.png', {
+  await capture('http://127.0.0.1:48291/reader/fac732a6-a40c-49d2-be21-d2339e7acaab', 'ai-drawer.png', {
     width: 1280,
     height: 850,
     waitMs: 2500,
@@ -112,7 +112,7 @@ try {
   });
 
   // 4. Mobile reader view screenshot
-  await capture('http://127.0.0.1:38492/reader/fac732a6-a40c-49d2-be21-d2339e7acaab', 'mobile.png', { width: 390, height: 844, mobile: true, waitMs: 2500 });
+  await capture('http://127.0.0.1:48291/reader/fac732a6-a40c-49d2-be21-d2339e7acaab', 'mobile.png', { width: 390, height: 844, mobile: true, waitMs: 2500 });
 
   console.log('All screenshots generated!');
 } catch (e) {

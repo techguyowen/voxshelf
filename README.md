@@ -107,7 +107,7 @@ cp .env.example .env   # add your GEMINI_API_KEY
 npm run dev
 ```
 
-Open [http://localhost:38492](http://localhost:38492) in your browser.
+Open [http://localhost:48291](http://localhost:48291) in your browser.
 
 Get a free Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey). You can place it in your `.env` file or enter it directly into the in-app Settings modal.
 
@@ -133,11 +133,11 @@ services:
     container_name: voxshelf
     restart: unless-stopped
     ports:
-      - "38492:38492"
+      - "48291:48291"
     volumes:
       - ./data:/app/data
     environment:
-      - PORT=38492
+      - PORT=48291
       # Optional: You can also paste your Gemini API key and pick models
       # directly in the web UI (Settings gear icon).
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -149,7 +149,7 @@ Start the container:
 docker compose up -d
 ```
 
-Open [http://localhost:38492](http://localhost:38492) in your browser. All documents, audio cache, and settings (including API keys entered via UI) persist in `./data`.
+Open [http://localhost:48291](http://localhost:48291) in your browser. All documents, audio cache, and settings (including API keys entered via UI) persist in `./data`.
 
 To update to the latest image:
 
@@ -162,7 +162,7 @@ docker compose up -d
 
 ```bash
 docker run -d --name voxshelf --restart unless-stopped \
-  -p 38492:38492 \
+  -p 48291:48291 \
   -e GEMINI_API_KEY=AIza… \
   -v ./data:/app/data \
   ghcr.io/techguyowen/voxshelf:latest
@@ -188,44 +188,44 @@ Each desktop app embeds the full reader and local database for offline use, and 
 ### Syncing Devices
 
 1. Open VoxShelf on your desktop or secondary device and go to **Settings**.
-2. Under **Library sync**, enter the URL of your primary instance (e.g. `http://192.168.1.50:38492`) and save.
+2. Under **Library sync**, enter the URL of your primary instance (e.g. `http://192.168.1.50:48291`) and save.
 3. Sync runs immediately and then periodically in the background (last-write-wins resolution). Details in [docs/SYNC.md](docs/SYNC.md).
 
 ---
 
 ## Self-Hosting Guides
 
-All guides assume internal port `38492`.
+All guides assume internal port `48291`.
 
 ### Unraid
 
 1. Open the **Docker** tab and select **Add Container**.
 2. Set **Repository** to `techguyowen/voxshelf:latest` (or build locally).
-3. Set port mapping `38492` → `38492` (TCP).
+3. Set port mapping `48291` → `48291` (TCP).
 4. Map container path `/app/data` to host path `/mnt/user/appdata/voxshelf`.
 5. Add variable `GEMINI_API_KEY` with your API key.
-6. Click **Apply** and access via `http://<unraid-ip>:38492`.
+6. Click **Apply** and access via `http://<unraid-ip>:48291`.
 
 ### TrueNAS SCALE
 
 1. Navigate to **Apps** → **Discover** → **Custom App** and use the `docker-compose.yml` template.
 2. Map `/app/data` to a storage dataset (e.g. `/mnt/tank/apps/voxshelf:/app/data`).
-3. Set `GEMINI_API_KEY` in environment variables and expose port `38492`.
-4. Deploy and navigate to `http://<truenas-ip>:38492`.
+3. Set `GEMINI_API_KEY` in environment variables and expose port `48291`.
+4. Deploy and navigate to `http://<truenas-ip>:48291`.
 
 ### Synology DSM
 
 1. Open **Container Manager** → **Project** → **Create**, and paste the contents of `docker-compose.yml`.
 2. Map `/app/data` to a folder on your volume (e.g. `/volume1/docker/voxshelf:/app/data`).
 3. Set `GEMINI_API_KEY` in environment variables.
-4. Launch the project and browse to `http://<nas-ip>:38492`.
+4. Launch the project and browse to `http://<nas-ip>:48291`.
 
 ### Railway / Cloud Deployment
 
 1. Fork or push this repository to GitHub, then click **New Project** → **Deploy from GitHub repo** in Railway.
 2. Set `GEMINI_API_KEY` in environment variables.
 3. Add a persistent volume mounted at `/app/data`.
-4. Railway routes public traffic automatically to internal port `38492`.
+4. Railway routes public traffic automatically to internal port `48291`.
 
 ### Cloudflare Tunnel (Remote Access)
 
@@ -244,7 +244,7 @@ credentials-file: /home/user/.cloudflared/<tunnel-id>.json
 
 ingress:
   - hostname: listen.yourdomain.com
-    service: http://localhost:38492
+    service: http://localhost:48291
   - service: http_status:404
 ```
 
@@ -265,7 +265,7 @@ cloudflared tunnel run voxshelf
 | `GEMINI_TEXT_MODEL` | `gemini-3.8-flash` | Text generation and OCR model (`gemini-3.8-flash` or `gemini-2.5-flash`). |
 | `DATA_DIR` | `./data` (`/app/data` in Docker) | Directory for SQLite database and cached audio files. |
 | `DB_PATH` | `$DATA_DIR/voxshelf.db` | Explicit SQLite database file location. |
-| `PORT` | `38492` | HTTP listening port. |
+| `PORT` | `48291` | HTTP listening port. |
 | `API_KEY` | — | Optional password protection for your instance. |
 
 ---
@@ -341,7 +341,7 @@ flowchart LR
 
 ## REST API Reference
 
-Base URL: `http://localhost:38492`. Responses return standard JSON with HTTP error codes on failure.
+Base URL: `http://localhost:48291`. Responses return standard JSON with HTTP error codes on failure.
 
 ### Audio & Synthesis
 

@@ -42,7 +42,7 @@ Open data folder** menu jumps straight there.
 
 ```bash
 npm install
-npm run dev            # terminal 1: Next.js on :38492
+npm run dev            # terminal 1: Next.js on :48291
 npm run desktop:dev    # terminal 2: Electron window (expects the dev server)
 ```
 
@@ -65,7 +65,7 @@ three platforms on every `main` push and attaches them to `v*` releases.
 
 - Desktop apps use the built-in `node:sqlite` driver (same schema and
   migrations as Docker's `better-sqlite3`); `/api/health` reports the engine.
-- The app serves only on `127.0.0.1` and picks a free port if `38492` is
+- The app serves only on `127.0.0.1` and picks a free port if `48291` is
   busy — a second copy can run alongside the first.
 - Startup problems? Check `desktop-startup.log` next to your data folder
   (Help → Open data folder, one level up).

@@ -8,7 +8,7 @@ server, but any node can sync with any other node's URL.
 ## Setup
 
 In the app: **Settings → Library sync** → enter the server URL
-(e.g. `http://192.168.1.10:38492`) → **Save sync settings**. The first cycle
+(e.g. `http://192.168.1.10:48291`) → **Save sync settings**. The first cycle
 runs immediately, then automatically about once a minute. **Sync now** forces
 a cycle on demand.
 

@@ -3,14 +3,14 @@
 // app at a Docker server in Settings > Library sync to sync between devices.
 //
 // Dev: run `npm run dev` first, then `electron .` (assumes the dev server on
-// port 38492, or set ELECTRON_START_URL to override).
+// port 48291, or set ELECTRON_START_URL to override).
 
 const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
 const fs = require("fs");
 const net = require("net");
 const path = require("path");
 
-const DEFAULT_PORT = 38492;
+const DEFAULT_PORT = 48291;
 const APP_NAME = "VoxShelf";
 
 if (!app.requestSingleInstanceLock()) app.quit();

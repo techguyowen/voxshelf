@@ -4,12 +4,12 @@ services:
     container_name: voxshelf
     restart: unless-stopped
     ports:
-      - "38492:38492"
+      - "48291:48291"
     volumes:
       # Persistent storage for SQLite database (voxshelf.db) and audio cache
       - ./data:/app/data
     environment:
-      - PORT=38492
+      - PORT=48291
       # Optional: You can enter your Gemini API key and select TTS/Text models
       # directly in the web UI (Settings gear icon).
       # If preferred, you can also pass them via environment variables below:

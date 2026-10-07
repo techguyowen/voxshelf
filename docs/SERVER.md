@@ -6,7 +6,7 @@ for `linux/amd64` and `linux/arm64`:
 ```bash
 docker pull ghcr.io/techguyowen/voxshelf:latest
 docker run -d --name voxshelf --restart unless-stopped \
-  -p 38492:38492 \
+  -p 48291:48291 \
   -e GEMINI_API_KEY=AIza… \
   -v ./data:/app/data \
   ghcr.io/voxshelf/voxshelf:latest
@@ -19,7 +19,7 @@ export GEMINI_API_KEY=AIza…
 docker compose up --build -d
 ```
 
-Then open `http://<server-lan-ip>:38492` — and use that same URL in your
+Then open `http://<server-lan-ip>:48291` — and use that same URL in your
 desktop apps under **Settings → Library sync**.
 
 ## Environment
@@ -30,7 +30,7 @@ desktop apps under **Settings → Library sync**.
 | `GEMINI_API_KEY` | for TTS/AI | Server key (in-app keys override it per device) |
 | `GEMINI_TTS_MODEL` / `GEMINI_TEXT_MODEL` | no | Model overrides |
 | `DATA_DIR` | no | DB + cache dir (default `/app/data` in the image) |
-| `PORT` | no | Default `38492` |
+| `PORT` | no | Default `48291` |
 | `SYNC_SERVER_URL` / `SYNC_ENABLED` / `SYNC_INTERVAL_MS` | no | Optional server→server sync (see [SYNC.md](SYNC.md)) |
 
 Health: `GET /api/health` (also the Docker `HEALTHCHECK`). `docker ps` shows
@@ -98,6 +98,6 @@ Minimal Caddy example (LAN + automatic HTTPS with your own domain):
 
 ```caddy
 voxshelf.example.com {
-    reverse_proxy 127.0.0.1:38492
+    reverse_proxy 127.0.0.1:48291
 }
 ```

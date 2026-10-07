@@ -372,7 +372,7 @@ function SyncSection() {
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="http://192.168.1.10:38492"
+            placeholder="http://192.168.1.10:48291"
             className={`${inputCls} pl-9`}
             autoComplete="off"
             spellCheck={false}
