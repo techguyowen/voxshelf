@@ -54,14 +54,16 @@ No subscriptions, no artificial paywalls, and no telemetry. Just a fast, reliabl
 - **Highlights & notes:** Select any text passage to highlight in color, add notes, and export your annotations directly to Markdown.
 - **Interactive timeline:** Bookmarks, sentence-level tap-to-play, scrub bar with hover previews, and remaining listening time estimates.
 
-### AI Reading Assistant
+### AI Reading Assistant & Voice Notes
 
+- **Voice notes & audio transcription:** Record microphone audio live with a real-time waveform visualizer, continuous speech recognition, and editable transcript preview, or upload audio files (`.mp3`, `.wav`, `.m4a`, `.ogg`, `.webm`, `.flac`, `.aac`).
+- **Gemini multimodal notes & transcription:** Powered by `gemini-3.5-transcribe` and `gemini-3.8-flash` to extract structured meeting notes, lecture study notes, executive summaries, key takeaways, and interactive checkable action items.
+- **Dual playback with karaoke sync:** Switch seamlessly between original audio recording playback (with synchronized sentence/word karaoke highlighting, scrub bar, ±15s jump, and speed presets) and Gemini TTS voice narration.
 - **Document summaries:** Quick bullet summaries or detailed multi-section overviews (powered by map-reduce for long books).
 - **Instant explainer:** Highlight any difficult sentence or jargon to get a grounded explanation based on the surrounding context.
 - **Interactive document chat:** Ask questions directly about the material with answers cited from document passages.
 - **Quizzes & flashcards:** Automatically generated multiple-choice comprehension quizzes and 3D flip-cards for active recall.
 - **Multi-speaker podcast generator:** Turn documents into conversational 2-host audio episodes (Alex & Sam) stitched into a single downloadable audio file.
-- **Dictation & cleanup:** Live voice dictation that uses AI to remove filler words and clean up grammar.
 
 ### Library & Organization
 
