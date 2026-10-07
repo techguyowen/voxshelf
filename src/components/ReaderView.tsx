@@ -464,6 +464,29 @@ function TimelineScrubber({
   );
 }
 
+function computeWordIndex(text: string, charOffset: number): number {
+  if (charOffset <= 0) return 0;
+  const clampedOffset = Math.min(text.length, Math.max(0, charOffset));
+  const parts = text.split(/(\s+)/);
+  let currentPos = 0;
+  let wordIdx = -1;
+  let lastWordIdx = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const isWord = part !== "" && !/^\s+$/.test(part);
+    const nextPos = currentPos + part.length;
+    if (isWord) {
+      wordIdx++;
+      lastWordIdx = wordIdx;
+    }
+    if (clampedOffset >= currentPos && clampedOffset < nextPos) {
+      return lastWordIdx;
+    }
+    currentPos = nextPos;
+  }
+  return lastWordIdx;
+}
+
 function formatAudioClock(totalSeconds: number): string {
   if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return "0:00";
   const m = Math.floor(totalSeconds / 60);
@@ -475,72 +498,37 @@ const ORIG_SPEED_OPTIONS = [0.75, 1, 1.25, 1.5, 1.75, 2];
 
 function OriginalAudioPlayerBar({
   doc,
-  audioUrl,
+  isPlaying,
+  currentTime,
+  duration,
+  speed,
+  volume,
+  muted,
+  onTogglePlay,
+  onSeek,
+  onSkip,
+  onSpeedChange,
+  onToggleMute,
   onSwitchToGemini,
   onOpenNotes,
 }: {
   doc: DocumentDetail;
-  audioUrl: string;
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  speed: number;
+  volume: number;
+  muted: boolean;
+  onTogglePlay: () => void;
+  onSeek: (val: number) => void;
+  onSkip: (secs: number) => void;
+  onSpeedChange: (speed: number) => void;
+  onToggleMute: () => void;
   onSwitchToGemini: () => void;
   onOpenNotes: () => void;
 }) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [speed, setSpeed] = useState(1);
-  const [volume, setVolumeState] = useState(() => loadVolume());
-  const [muted, setMutedState] = useState(() => loadMuted());
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.playbackRate = speed;
-  }, [speed]);
-
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.volume = muted ? 0 : volume;
-  }, [volume, muted]);
-
-  const togglePlay = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (audio.paused) {
-      audio.play().catch(() => {});
-    } else {
-      audio.pause();
-    }
-  };
-
-  const skip = (secs: number) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = Math.max(0, Math.min(audio.duration || 0, audio.currentTime + secs));
-  };
-
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = Number(e.target.value);
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.currentTime = val;
-    setCurrentTime(val);
-  };
-
   return (
     <footer className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 px-4 py-2.5 shadow-2xl backdrop-blur-md dark:border-zinc-800 dark:bg-zinc-950/95">
-      <audio
-        ref={audioRef}
-        src={audioUrl}
-        preload="metadata"
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
-        onEnded={() => setIsPlaying(false)}
-      />
-
       <div className="mx-auto flex max-w-4xl flex-col gap-2">
         {/* Scrubber Progress Bar */}
         <div className="flex items-center gap-2">
@@ -553,7 +541,7 @@ function OriginalAudioPlayerBar({
             max={duration || 100}
             step={0.1}
             value={currentTime}
-            onChange={handleSeek}
+            onChange={(e) => onSeek(Number(e.target.value))}
             className="h-1.5 flex-1 cursor-pointer accent-emerald-600 dark:accent-emerald-400"
             aria-label="Seek original audio"
           />
@@ -582,7 +570,7 @@ function OriginalAudioPlayerBar({
           {/* Center: Skip & Play/Pause */}
           <div className="flex items-center gap-2 sm:gap-4">
             <button
-              onClick={() => skip(-15)}
+              onClick={() => onSkip(-15)}
               className="flex items-center gap-0.5 rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
               title="Skip back 15 seconds"
               aria-label="Skip back 15 seconds"
@@ -592,7 +580,7 @@ function OriginalAudioPlayerBar({
             </button>
 
             <button
-              onClick={togglePlay}
+              onClick={onTogglePlay}
               className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600 text-white shadow hover:bg-emerald-700 active:scale-95 dark:bg-emerald-500 dark:text-zinc-950"
               aria-label={isPlaying ? "Pause" : "Play"}
             >
@@ -600,7 +588,7 @@ function OriginalAudioPlayerBar({
             </button>
 
             <button
-              onClick={() => skip(15)}
+              onClick={() => onSkip(15)}
               className="flex items-center gap-0.5 rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
               title="Skip forward 15 seconds"
               aria-label="Skip forward 15 seconds"
@@ -616,7 +604,7 @@ function OriginalAudioPlayerBar({
             <div className="flex items-center rounded-lg border border-zinc-200 p-0.5 dark:border-zinc-800">
               <select
                 value={speed}
-                onChange={(e) => setSpeed(Number(e.target.value))}
+                onChange={(e) => onSpeedChange(Number(e.target.value))}
                 className="bg-transparent px-1.5 py-0.5 text-xs font-semibold text-zinc-700 outline-none dark:text-zinc-300"
                 aria-label="Playback speed"
               >
@@ -630,11 +618,7 @@ function OriginalAudioPlayerBar({
 
             {/* Volume Toggle */}
             <button
-              onClick={() => {
-                const nextMuted = !muted;
-                setMutedState(nextMuted);
-                saveMuted(nextMuted);
-              }}
+              onClick={onToggleMute}
               className="rounded-lg p-1.5 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
               title={muted ? "Unmute" : "Mute"}
               aria-label={muted ? "Unmute" : "Mute"}
@@ -682,6 +666,15 @@ export function ReaderView({ docId }: { docId: string }) {
   const hasOriginalAudio = Boolean(doc?.originalAudioUrl);
   const [playbackSource, setPlaybackSource] = useState<"original" | "gemini">("original");
 
+  // Original Audio state
+  const origAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [origIsPlaying, setOrigIsPlaying] = useState(false);
+  const [origCurrentTime, setOrigCurrentTime] = useState(0);
+  const [origDuration, setOrigDuration] = useState(0);
+  const [origSpeed, setOrigSpeed] = useState(1);
+  const [origVolume, setOrigVolume] = useState(() => loadVolume());
+  const [origMuted, setOrigMuted] = useState(() => loadMuted());
+
   useEffect(() => {
     if (doc?.originalAudioUrl) {
       setPlaybackSource("original");
@@ -689,6 +682,96 @@ export function ReaderView({ docId }: { docId: string }) {
       setPlaybackSource("gemini");
     }
   }, [doc?.id, doc?.originalAudioUrl]);
+
+  useEffect(() => {
+    const audio = origAudioRef.current;
+    if (!audio) return;
+    audio.playbackRate = origSpeed;
+  }, [origSpeed]);
+
+  useEffect(() => {
+    const audio = origAudioRef.current;
+    if (!audio) return;
+    audio.volume = origMuted ? 0 : origVolume;
+  }, [origVolume, origMuted]);
+
+  const playOriginal = useCallback((seekTime?: number) => {
+    const audio = origAudioRef.current;
+    if (!audio) return;
+    if (typeof seekTime === "number" && Number.isFinite(seekTime)) {
+      audio.currentTime = seekTime;
+      setOrigCurrentTime(seekTime);
+    }
+    audio.play().catch(() => {});
+  }, []);
+
+  const pauseOriginal = useCallback(() => {
+    const audio = origAudioRef.current;
+    if (!audio) return;
+    audio.pause();
+  }, []);
+
+  const toggleOriginal = useCallback(() => {
+    const audio = origAudioRef.current;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  }, []);
+
+  const seekOriginal = useCallback(
+    (time: number) => {
+      const audio = origAudioRef.current;
+      if (!audio) return;
+      const dur = origDuration || audio.duration || 0;
+      const clamped = Math.max(0, Math.min(dur, time));
+      audio.currentTime = clamped;
+      setOrigCurrentTime(clamped);
+    },
+    [origDuration],
+  );
+
+  const skipOriginal = useCallback(
+    (secs: number) => {
+      const audio = origAudioRef.current;
+      if (!audio) return;
+      const dur = origDuration || audio.duration || 0;
+      const clamped = Math.max(0, Math.min(dur, audio.currentTime + secs));
+      audio.currentTime = clamped;
+      setOrigCurrentTime(clamped);
+    },
+    [origDuration],
+  );
+
+  const setOrigAudioSpeed = useCallback((s: number) => {
+    const clamped = Math.max(0.5, Math.min(3.0, Math.round(s * 100) / 100));
+    setOrigSpeed(clamped);
+  }, []);
+
+  const toggleOrigMute = useCallback(() => {
+    setOrigMuted((m) => {
+      const next = !m;
+      saveMuted(next);
+      return next;
+    });
+  }, []);
+
+  const jumpToSentenceOriginal = useCallback(
+    (sentenceIdx: number) => {
+      if (!doc || !doc.sentences[sentenceIdx]) return;
+      const totalChars = Math.max(
+        1,
+        doc.totalChars || doc.sentences[doc.sentences.length - 1]?.charEnd || 1,
+      );
+      const s = doc.sentences[sentenceIdx];
+      const dur = origDuration || origAudioRef.current?.duration || 0;
+      const targetTime = s && dur > 0 ? (s.charStart / totalChars) * dur : 0;
+      seekOriginal(targetTime);
+    },
+    [doc, origDuration, seekOriginal],
+  );
 
   function openAi(tab: AiTab = "summary") {
     setAiTab(tab);
@@ -851,15 +934,98 @@ export function ReaderView({ docId }: { docId: string }) {
   );
 
   const player = usePlayer(doc, { onProgress: persistProgress, filterSentence });
+
+  // Compute synchronized karaoke active sentence index
+  const activeSentenceIdx = useMemo(() => {
+    if (!doc || doc.sentences.length === 0) return 0;
+    if (playbackSource === "gemini") {
+      return player.currentIdx;
+    }
+    const totalChars = Math.max(
+      1,
+      doc.totalChars || doc.sentences[doc.sentences.length - 1]?.charEnd || 1,
+    );
+    const dur = origDuration || origAudioRef.current?.duration || 1;
+    const targetChar = (origCurrentTime / Math.max(1, dur)) * totalChars;
+
+    const found = doc.sentences.find(
+      (s) => targetChar >= s.charStart && targetChar <= s.charEnd,
+    );
+    if (found) return found.idx;
+
+    let closestDist = Infinity;
+    let closestIdx = 0;
+    for (const s of doc.sentences) {
+      const mid = (s.charStart + s.charEnd) / 2;
+      const dist = Math.abs(mid - targetChar);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closestIdx = s.idx;
+      }
+    }
+    return closestIdx;
+  }, [doc, playbackSource, player.currentIdx, origCurrentTime, origDuration]);
+
+  // Compute synchronized karaoke active word index
+  const activeWordIdx = useMemo(() => {
+    if (playbackSource === "gemini") {
+      return player.currentWord;
+    }
+    if (!doc || !doc.sentences[activeSentenceIdx]) return -1;
+    const s = doc.sentences[activeSentenceIdx];
+    const totalChars = Math.max(
+      1,
+      doc.totalChars || doc.sentences[doc.sentences.length - 1]?.charEnd || 1,
+    );
+    const dur = origDuration || origAudioRef.current?.duration || 1;
+    const targetChar = (origCurrentTime / Math.max(1, dur)) * totalChars;
+    const offset = targetChar - s.charStart;
+    return computeWordIndex(s.text, offset);
+  }, [playbackSource, player.currentWord, doc, activeSentenceIdx, origCurrentTime, origDuration]);
+
+  // Mode switching
+  const switchToGemini = useCallback(() => {
+    pauseOriginal();
+    setPlaybackSource("gemini");
+    haptic();
+    player.playFrom(activeSentenceIdx);
+  }, [pauseOriginal, player, activeSentenceIdx]);
+
+  const switchToOriginal = useCallback(() => {
+    if (player.status === "playing") player.pause();
+    setPlaybackSource("original");
+    haptic();
+    if (!doc) return;
+    const totalChars = Math.max(
+      1,
+      doc.totalChars || doc.sentences[doc.sentences.length - 1]?.charEnd || 1,
+    );
+    const s = doc.sentences[player.currentIdx];
+    const dur = origDuration || origAudioRef.current?.duration || 0;
+    const targetTime = s && dur > 0 ? (s.charStart / totalChars) * dur : 0;
+    playOriginal(targetTime);
+  }, [player, doc, origDuration, playOriginal]);
+
   const handlePlay = useCallback(
     (idx: number) => {
-      if (!appearance.clickToListen) return;
+      if (!appearance.clickToListen || !doc) return;
       haptic();
       setResumeDismissed(true);
       resumeAutoScroll();
-      player.playFrom(idx);
+      if (playbackSource === "original") {
+        const totalChars = Math.max(
+          1,
+          doc.totalChars || doc.sentences[doc.sentences.length - 1]?.charEnd || 1,
+        );
+        const s = doc.sentences[idx];
+        const dur = origDuration || origAudioRef.current?.duration || 0;
+        const targetTime = s && dur > 0 ? (s.charStart / totalChars) * dur : 0;
+        playOriginal(targetTime);
+      } else {
+        player.playFrom(idx);
+      }
     },
-    [player, appearance.clickToListen, resumeAutoScroll],
+    [appearance.clickToListen, doc, playbackSource, origDuration, playOriginal, player, resumeAutoScroll],
   );
 
   // Publish now-playing metadata for the floating mini-player + lock screen.
@@ -870,27 +1036,41 @@ export function ReaderView({ docId }: { docId: string }) {
     publishNowPlaying({
       docId: doc.id,
       title: doc.title,
-      sentenceIdx: player.currentIdx,
+      sentenceIdx: activeSentenceIdx,
       sentenceCount: doc.sentenceCount,
-      snippet: (doc.sentences[player.currentIdx]?.text ?? "").slice(0, 80),
-      speed: player.speed,
-      clipProgress: Math.round(player.clipProgress * 20) / 20,
-      status: player.status,
+      snippet: (doc.sentences[activeSentenceIdx]?.text ?? "").slice(0, 80),
+      speed: playbackSource === "original" ? origSpeed : player.speed,
+      clipProgress: playbackSource === "original" ? 0 : quantizedProgress,
+      status: playbackSource === "original" ? (origIsPlaying ? "playing" : "paused") : player.status,
     });
-  }, [doc, player.currentIdx, player.speed, quantizedProgress, player.status]);
+  }, [
+    doc,
+    activeSentenceIdx,
+    playbackSource,
+    origSpeed,
+    origIsPlaying,
+    player.speed,
+    quantizedProgress,
+    player.status,
+  ]);
 
   // Periodic reading-session pings while audio is actually playing.
   const livePlayerRef = useRef({ idx: 0, speed: 1 });
-  livePlayerRef.current = { idx: player.currentIdx, speed: player.speed };
+  livePlayerRef.current = {
+    idx: activeSentenceIdx,
+    speed: playbackSource === "original" ? origSpeed : player.speed,
+  };
   const sessionAnchorRef = useRef(0);
   const docTextsRef = useRef<string[]>([]);
   useEffect(() => {
-    sessionAnchorRef.current = player.currentIdx;
+    sessionAnchorRef.current = activeSentenceIdx;
     if (doc) docTextsRef.current = doc.sentences.map((s) => s.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc?.id]);
   useEffect(() => {
-    if (!doc || player.status !== "playing") return;
+    const isPlaying =
+      playbackSource === "original" ? origIsPlaying : player.status === "playing";
+    if (!doc || !isPlaying) return;
     const docId = doc.id;
     const iv = setInterval(() => {
       const { idx, speed } = livePlayerRef.current;
@@ -906,7 +1086,7 @@ export function ReaderView({ docId }: { docId: string }) {
         .catch(() => {});
     }, 15000);
     return () => clearInterval(iv);
-  }, [doc, player.status]);
+  }, [doc, playbackSource, origIsPlaying, player.status]);
 
   // Auto-play as soon as the file opens (optional).
   const autoPlayedRef = useRef<string | null>(null);
@@ -914,10 +1094,16 @@ export function ReaderView({ docId }: { docId: string }) {
     if (!doc || !appearance.autoPlay) return;
     if (autoPlayedRef.current === doc.id) return;
     autoPlayedRef.current = doc.id;
-    const t = setTimeout(() => player.play(), 600);
+    const t = setTimeout(() => {
+      if (doc.originalAudioUrl && playbackSource === "original") {
+        playOriginal();
+      } else {
+        player.play();
+      }
+    }, 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc?.id, appearance.autoPlay]);
+  }, [doc?.id, doc?.originalAudioUrl, appearance.autoPlay, playbackSource, playOriginal, player]);
 
   // Speakable (filtered) text per sentence for display + skip dimming.
   const speakMap = useMemo(() => {
@@ -984,11 +1170,15 @@ export function ReaderView({ docId }: { docId: string }) {
     if (Date.now() < autoScrollHoldUntil.current && !firstScroll.current) {
       return;
     }
-    if (player.status !== "playing" && player.status !== "loading" && !firstScroll.current) {
+    const isPlaying =
+      playbackSource === "original"
+        ? origIsPlaying
+        : player.status === "playing" || player.status === "loading";
+    if (!isPlaying && !firstScroll.current) {
       return;
     }
     const el = articleRef.current?.querySelector(
-      `[data-idx="${player.currentIdx}"]`,
+      `[data-idx="${activeSentenceIdx}"]`,
     );
     if (el) {
       const reduced = window.matchMedia(
@@ -1000,19 +1190,25 @@ export function ReaderView({ docId }: { docId: string }) {
       });
     }
     firstScroll.current = false;
-  }, [doc, player.currentIdx, player.status]);
+  }, [doc, activeSentenceIdx, origIsPlaying, player.status, playbackSource]);
 
   // Background tab resync & mobile lockscreen wakeup: when the tab/screen
   // becomes visible again mid-playback, re-sync the audio cursor state and
   // smoothly scroll the active sentence back into center view so the visual
   // state never lags behind the audio.
   const liveResyncRef = useRef({ idx: 0, status: player.status, resync: player.resync });
-  liveResyncRef.current = { idx: player.currentIdx, status: player.status, resync: player.resync };
+  liveResyncRef.current = { idx: activeSentenceIdx, status: player.status, resync: player.resync };
   useEffect(() => {
     const wake = () => {
       const live = liveResyncRef.current;
-      if (live.status !== "playing" && live.status !== "loading") return;
-      live.resync();
+      const isPlaying =
+        playbackSource === "original"
+          ? origIsPlaying
+          : live.status === "playing" || live.status === "loading";
+      if (!isPlaying) return;
+      if (playbackSource === "gemini") {
+        live.resync();
+      }
       // A backgrounded tab held no manual-scroll intent; clear the hold so
       // the wake-up scroll always lands on the live sentence.
       autoScrollHoldUntil.current = 0;
@@ -1034,7 +1230,7 @@ export function ReaderView({ docId }: { docId: string }) {
       window.removeEventListener("focus", wake);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [playbackSource, origIsPlaying]);
 
   const updateSelection = useCallback(() => {
     const sel = window.getSelection();
@@ -1110,10 +1306,21 @@ export function ReaderView({ docId }: { docId: string }) {
       if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
       haptic();
       resumeAutoScroll();
-      if (dx < 0) player.next();
-      else player.prev();
+      if (dx < 0) {
+        if (playbackSource === "original") {
+          jumpToSentenceOriginal(Math.min((doc.sentences.length || 1) - 1, activeSentenceIdx + 1));
+        } else {
+          player.next();
+        }
+      } else {
+        if (playbackSource === "original") {
+          jumpToSentenceOriginal(Math.max(0, activeSentenceIdx - 1));
+        } else {
+          player.prev();
+        }
+      }
     },
-    [doc, player, resumeAutoScroll, updateSelection],
+    [doc, playbackSource, activeSentenceIdx, jumpToSentenceOriginal, player, resumeAutoScroll, updateSelection],
   );
 
   const saveHighlight = useCallback(
@@ -1165,14 +1372,14 @@ export function ReaderView({ docId }: { docId: string }) {
       if (!doc) return;
       haptic();
       api
-        .addBookmark(doc.id, player.currentIdx, note || undefined)
+        .addBookmark(doc.id, activeSentenceIdx, note || undefined)
         .then((b) => {
           setBookmarks((list) => [...list, b].sort((a, c) => a.sentenceIdx - c.sentenceIdx));
-          toast.success(`Bookmarked sentence ${player.currentIdx + 1}.`);
+          toast.success(`Bookmarked sentence ${activeSentenceIdx + 1}.`);
         })
         .catch((e) => toast.error(e instanceof Error ? e.message : "Bookmark failed."));
     },
-    [doc, player, toast],
+    [doc, activeSentenceIdx, toast],
   );
 
   const deleteBookmark = useCallback(
@@ -1190,14 +1397,18 @@ export function ReaderView({ docId }: { docId: string }) {
       setAiOpen(false);
       setResumeDismissed(true);
       resumeAutoScroll();
-      player.playFrom(idx);
+      if (playbackSource === "original") {
+        jumpToSentenceOriginal(idx);
+      } else {
+        player.playFrom(idx);
+      }
       requestAnimationFrame(() => {
         articleRef.current
           ?.querySelector(`[data-idx="${idx}"]`)
           ?.scrollIntoView({ block: "center" });
       });
     },
-    [player, resumeAutoScroll],
+    [playbackSource, jumpToSentenceOriginal, player, resumeAutoScroll],
   );
 
   const jumpToResume = useCallback(() => {
@@ -1209,13 +1420,17 @@ export function ReaderView({ docId }: { docId: string }) {
       0,
       Math.min(doc.sentenceCount - 1, initialProgressRef.current ?? 0),
     );
-    player.playFrom(idx);
+    if (playbackSource === "original") {
+      jumpToSentenceOriginal(idx);
+    } else {
+      player.playFrom(idx);
+    }
     requestAnimationFrame(() => {
       articleRef.current
         ?.querySelector(`[data-idx="${idx}"]`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     });
-  }, [doc, player, resumeAutoScroll]);
+  }, [doc, playbackSource, jumpToSentenceOriginal, player, resumeAutoScroll]);
 
   /** TOC chapter jump: scroll to center, keep playing only if playing. */
   const jumpToChapter = useCallback(
@@ -1224,10 +1439,14 @@ export function ReaderView({ docId }: { docId: string }) {
       setTocOpen(false);
       setResumeDismissed(true);
       resumeAutoScroll();
-      if (player.status === "playing" || player.status === "loading") {
-        player.playFrom(idx);
+      if (playbackSource === "original") {
+        jumpToSentenceOriginal(idx);
       } else {
-        player.seekTo(idx);
+        if (player.status === "playing" || player.status === "loading") {
+          player.playFrom(idx);
+        } else {
+          player.seekTo(idx);
+        }
       }
       requestAnimationFrame(() => {
         articleRef.current
@@ -1235,12 +1454,16 @@ export function ReaderView({ docId }: { docId: string }) {
           ?.scrollIntoView({ behavior: "smooth", block: "center" });
       });
     },
-    [player, resumeAutoScroll],
+    [playbackSource, jumpToSentenceOriginal, player, resumeAutoScroll],
   );
 
   /** Global mute toggle (the "M" shortcut); PlayerBar syncs via event. */
   const toggleMute = useCallback(() => {
     haptic();
+    if (playbackSource === "original") {
+      toggleOrigMute();
+      return;
+    }
     const audio = getSharedAudio();
     const currentlyMuted = audio ? audio.muted : loadMuted();
     const next = !currentlyMuted;
@@ -1255,17 +1478,21 @@ export function ReaderView({ docId }: { docId: string }) {
     saveMuted(next);
     if (!next && loadVolume() === 0) saveVolume(0.8);
     emitVolumeChange();
-  }, []);
+  }, [playbackSource, toggleOrigMute]);
 
   const overallPct = useMemo(() => {
-    if (!doc || doc.sentenceCount <= 1) return 0;
+    if (!doc) return 0;
+    if (playbackSource === "original" && origDuration > 0) {
+      return Math.min(100, Math.round((origCurrentTime / origDuration) * 100));
+    }
+    if (doc.sentenceCount <= 1) return 0;
     return Math.min(
       100,
       Math.round(
-        ((player.currentIdx + player.clipProgress) / (doc.sentenceCount - 1)) * 100,
+        ((activeSentenceIdx + (playbackSource === "original" ? 0 : player.clipProgress)) / (doc.sentenceCount - 1)) * 100,
       ),
     );
-  }, [doc, player.currentIdx, player.clipProgress]);
+  }, [doc, playbackSource, origDuration, origCurrentTime, activeSentenceIdx, player.clipProgress]);
 
   // --- Dynamic "time left" estimate (updates with sentence + speed) ---
   const sentenceWordCum = useMemo(
@@ -1274,10 +1501,11 @@ export function ReaderView({ docId }: { docId: string }) {
   );
   const wordsLeft = wordsRemainingFrom(
     sentenceWordCum,
-    player.currentIdx,
-    player.clipProgress,
+    activeSentenceIdx,
+    playbackSource === "original" ? 0 : player.clipProgress,
   );
-  const timeLeftLabel = formatTimeLeftBadge(wordsLeft, player.speed);
+  const activeSpeed = playbackSource === "original" ? origSpeed : player.speed;
+  const timeLeftLabel = formatTimeLeftBadge(wordsLeft, activeSpeed);
   const docCostUsd = doc ? estimateTtsCostUsd(doc.totalChars) : 0;
 
   // --- Keyboard shortcuts ("?"/cheat-sheet toggle lives in AppShell) ---
@@ -1306,35 +1534,51 @@ export function ReaderView({ docId }: { docId: string }) {
       case " ":
         e.preventDefault();
         haptic();
-        player.toggle();
+        if (playbackSource === "original") {
+          toggleOriginal();
+        } else {
+          player.toggle();
+        }
         break;
       case "ArrowLeft":
         e.preventDefault();
         haptic();
-        if (e.shiftKey) void player.skip(-15);
-        else player.prev();
+        if (playbackSource === "original") {
+          if (e.shiftKey) skipOriginal(-15);
+          else jumpToSentenceOriginal(Math.max(0, activeSentenceIdx - 1));
+        } else {
+          if (e.shiftKey) void player.skip(-15);
+          else player.prev();
+        }
         break;
       case "ArrowRight":
         e.preventDefault();
         haptic();
-        if (e.shiftKey) void player.skip(15);
-        else player.next();
+        if (playbackSource === "original") {
+          if (e.shiftKey) skipOriginal(15);
+          else jumpToSentenceOriginal(Math.min((doc.sentences.length || 1) - 1, activeSentenceIdx + 1));
+        } else {
+          if (e.shiftKey) void player.skip(15);
+          else player.next();
+        }
         break;
       case "ArrowUp":
-        e.preventDefault();
-        player.setSpeed(Math.round((player.speed + 0.1) * 10) / 10);
-        break;
-      case "ArrowDown":
-        e.preventDefault();
-        player.setSpeed(Math.round((player.speed - 0.1) * 10) / 10);
-        break;
-      case "[":
-        e.preventDefault();
-        player.setSpeed(Math.round((player.speed - 0.1) * 10) / 10);
-        break;
       case "]":
         e.preventDefault();
-        player.setSpeed(Math.round((player.speed + 0.1) * 10) / 10);
+        if (playbackSource === "original") {
+          setOrigAudioSpeed(Math.round((origSpeed + 0.1) * 10) / 10);
+        } else {
+          player.setSpeed(Math.round((player.speed + 0.1) * 10) / 10);
+        }
+        break;
+      case "ArrowDown":
+      case "[":
+        e.preventDefault();
+        if (playbackSource === "original") {
+          setOrigAudioSpeed(Math.round((origSpeed - 0.1) * 10) / 10);
+        } else {
+          player.setSpeed(Math.round((player.speed - 0.1) * 10) / 10);
+        }
         break;
       default: {
         // Shift+arrows handled above; ignore other shifted keys.
@@ -1349,10 +1593,18 @@ export function ReaderView({ docId }: { docId: string }) {
         else if (k === "p") openAi("podcast");
         else if (k === "j") {
           haptic();
-          player.next();
+          if (playbackSource === "original") {
+            jumpToSentenceOriginal(Math.min((doc.sentences.length || 1) - 1, activeSentenceIdx + 1));
+          } else {
+            player.next();
+          }
         } else if (k === "k") {
           haptic();
-          player.prev();
+          if (playbackSource === "original") {
+            jumpToSentenceOriginal(Math.max(0, activeSentenceIdx - 1));
+          } else {
+            player.prev();
+          }
         } else if (k === "m") toggleMute();
         else if (k === "t") setTocOpen((v) => !v);
         break;
@@ -1547,10 +1799,7 @@ export function ReaderView({ docId }: { docId: string }) {
             <div className="inline-flex rounded-xl bg-zinc-200/80 p-0.5 dark:bg-zinc-800">
               <button
                 type="button"
-                onClick={() => {
-                  if (player.status === "playing") player.pause();
-                  setPlaybackSource("original");
-                }}
+                onClick={switchToOriginal}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                   playbackSource === "original"
                     ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-900 dark:text-emerald-300"
@@ -1562,7 +1811,7 @@ export function ReaderView({ docId }: { docId: string }) {
               </button>
               <button
                 type="button"
-                onClick={() => setPlaybackSource("gemini")}
+                onClick={switchToGemini}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
                   playbackSource === "gemini"
                     ? "bg-white text-emerald-800 shadow-sm dark:bg-zinc-900 dark:text-emerald-300"
@@ -1711,14 +1960,18 @@ export function ReaderView({ docId }: { docId: string }) {
 
       <TimelineScrubber
         doc={doc}
-        currentIdx={player.currentIdx}
-        clipProgress={player.clipProgress}
-        speed={player.speed}
+        currentIdx={activeSentenceIdx}
+        clipProgress={playbackSource === "original" ? 0 : player.clipProgress}
+        speed={playbackSource === "original" ? origSpeed : player.speed}
         cum={sentenceWordCum}
         onJump={(idx) => {
           setResumeDismissed(true);
           resumeAutoScroll();
-          player.playFrom(idx);
+          if (playbackSource === "original") {
+            jumpToSentenceOriginal(idx);
+          } else {
+            player.playFrom(idx);
+          }
         }}
       />
 
@@ -1735,16 +1988,17 @@ export function ReaderView({ docId }: { docId: string }) {
       >
         {doc.sentences.map((s) => {
           const filtered = speakMap.get(s.idx);
+          const isActive = s.idx === activeSentenceIdx;
           return (
             <SentenceItem
               key={s.idx}
               sentence={s}
               displayText={filtered?.text ?? s.text}
-              active={s.idx === player.currentIdx}
-              near={Math.abs(s.idx - player.currentIdx) === 1}
-              loading={s.idx === player.loadingIdx && player.status === "loading"}
-              activeWord={s.idx === player.currentIdx ? player.currentWord : -1}
-              skipped={filtered?.skipped ?? false}
+              active={isActive}
+              near={Math.abs(s.idx - activeSentenceIdx) === 1}
+              loading={playbackSource === "gemini" && s.idx === player.loadingIdx && player.status === "loading"}
+              activeWord={isActive ? activeWordIdx : -1}
+              skipped={playbackSource === "gemini" ? (filtered?.skipped ?? false) : false}
               clickable={appearance.clickToListen}
               highlights={highlightsBySentence.get(s.idx) || []}
               bionic={prefs.bionicReading}
@@ -1832,7 +2086,7 @@ export function ReaderView({ docId }: { docId: string }) {
                       0,
                     ) /
                       150 /
-                      player.speed,
+                      (playbackSource === "original" ? origSpeed : player.speed),
                   ),
                 )}{" "}
                 min left)
@@ -1854,11 +2108,34 @@ export function ReaderView({ docId }: { docId: string }) {
           </div>
         )}
 
+      {doc.originalAudioUrl && (
+        <audio
+          ref={origAudioRef}
+          src={doc.originalAudioUrl}
+          preload="metadata"
+          onPlay={() => setOrigIsPlaying(true)}
+          onPause={() => setOrigIsPlaying(false)}
+          onTimeUpdate={(e) => setOrigCurrentTime(e.currentTarget.currentTime)}
+          onLoadedMetadata={(e) => setOrigDuration(e.currentTarget.duration)}
+          onEnded={() => setOrigIsPlaying(false)}
+        />
+      )}
+
       {hasOriginalAudio && playbackSource === "original" ? (
         <OriginalAudioPlayerBar
           doc={doc}
-          audioUrl={doc.originalAudioUrl!}
-          onSwitchToGemini={() => setPlaybackSource("gemini")}
+          isPlaying={origIsPlaying}
+          currentTime={origCurrentTime}
+          duration={origDuration}
+          speed={origSpeed}
+          volume={origVolume}
+          muted={origMuted}
+          onTogglePlay={toggleOriginal}
+          onSeek={seekOriginal}
+          onSkip={skipOriginal}
+          onSpeedChange={setOrigAudioSpeed}
+          onToggleMute={toggleOrigMute}
+          onSwitchToGemini={switchToGemini}
           onOpenNotes={() => openAi("notes")}
         />
       ) : (
@@ -1875,7 +2152,7 @@ export function ReaderView({ docId }: { docId: string }) {
         <PrerenderModal
           docId={doc.id}
           title={doc.title}
-          currentIdx={player.currentIdx}
+          currentIdx={activeSentenceIdx}
           onClose={() => {
             setPrerenderOpen(false);
             refreshPrerenderStats();
@@ -1897,14 +2174,14 @@ export function ReaderView({ docId }: { docId: string }) {
         open={tocOpen}
         onClose={() => setTocOpen(false)}
         sentences={doc.sentences}
-        currentIdx={player.currentIdx}
+        currentIdx={activeSentenceIdx}
         onJump={jumpToChapter}
       />
       <AIDrawer
         open={aiOpen}
         onClose={() => setAiOpen(false)}
         doc={doc}
-        currentIdx={player.currentIdx}
+        currentIdx={activeSentenceIdx}
         selection={selection}
         bookmarks={bookmarks}
         onJump={jumpTo}

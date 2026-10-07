@@ -209,6 +209,7 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
   const [interimText, setInterimText] = useState("");
+  const [fullTranscript, setFullTranscript] = useState("");
 
   // Upload file state
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -301,11 +302,17 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
       rec.interimResults = true;
       rec.lang = navigator.language || "en-US";
       rec.onresult = (e) => {
-        let acc = "";
-        for (let i = Math.max(0, e.results.length - 2); i < e.results.length; i++) {
-          acc += e.results[i][0].transcript + " ";
+        let fullAcc = "";
+        for (let i = 0; i < e.results.length; i++) {
+          fullAcc += e.results[i][0].transcript + " ";
         }
-        setInterimText(acc.trim());
+        setFullTranscript(fullAcc.trim());
+
+        let recentAcc = "";
+        for (let i = Math.max(0, e.results.length - 2); i < e.results.length; i++) {
+          recentAcc += e.results[i][0].transcript + " ";
+        }
+        setInterimText(recentAcc.trim());
       };
       rec.start();
     } catch {
@@ -327,6 +334,7 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
   async function startRecording() {
     setError(null);
     setInterimText("");
+    setFullTranscript("");
     setRecordedBlob(null);
     if (recordedAudioUrl) {
       URL.revokeObjectURL(recordedAudioUrl);
@@ -434,7 +442,7 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
 
     setBusy(true);
     setError(null);
-    setStatusMessage("Uploading audio recording...");
+    setStatusMessage("Transcribing with Gemini 3.5 Transcribe & extracting notes...");
 
     try {
       const form = new FormData();
@@ -453,7 +461,6 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
         form.append("durationMs", String(recordSeconds * 1000));
       }
 
-      setStatusMessage("Transcribing speech and extracting notes with Gemini 3...");
       const res = await api.transcribeAndNote(form);
 
       if (res.document?.id) {
@@ -463,6 +470,26 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to transcribe audio.");
+      setBusy(false);
+      setStatusMessage(null);
+    }
+  }
+
+  async function handleSaveDirectTranscript() {
+    if (!fullTranscript.trim()) return;
+    setBusy(true);
+    setError(null);
+    setStatusMessage("Saving document to library...");
+    try {
+      const doc = await api.createDocument({
+        title: title.trim() || `Live Recording (${formatTimer(recordSeconds)})`,
+        text: fullTranscript.trim(),
+        tags: parseTags(tags),
+        sourceType: "dictation",
+      });
+      onSaved(doc.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save transcript.");
       setBusy(false);
       setStatusMessage(null);
     }
@@ -570,7 +597,7 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
                 Click to Start Recording
               </h3>
               <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                Speak naturally. Audio is recorded live and transcribed with Gemini.
+                Speak naturally. Audio is recorded live and transcribed with Gemini 3.5.
               </p>
             </div>
           )}
@@ -648,7 +675,7 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
                 <div className="flex items-center gap-2">
                   <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400" />
                   <span className="font-semibold text-xs text-zinc-800 dark:text-zinc-200">
-                    Recording Complete ({formatTimer(recordSeconds)})
+                    Recording Complete ({formatTimer(recordSeconds)}) · Audio saved
                   </span>
                 </div>
                 <button
@@ -658,6 +685,7 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
                     setRecordSeconds(0);
                     setRecordedBlob(null);
                     setInterimText("");
+                    setFullTranscript("");
                     if (recordedAudioUrl) {
                       URL.revokeObjectURL(recordedAudioUrl);
                       setRecordedAudioUrl(null);
@@ -675,6 +703,18 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
                   src={recordedAudioUrl}
                   className="h-9 w-full rounded-lg"
                 />
+              )}
+
+              {/* Live Recognized Speech preview if available */}
+              {fullTranscript && (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
+                  <div className="mb-1 flex items-center gap-1.5 font-semibold text-[11px] text-emerald-700 dark:text-emerald-400">
+                    <Radio size={12} /> Live Recognized Speech Preview
+                  </div>
+                  <p className="max-h-28 overflow-y-auto leading-relaxed whitespace-pre-wrap italic">
+                    “{fullTranscript}”
+                  </p>
+                </div>
               )}
             </div>
           )}
@@ -741,7 +781,7 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
         </div>
       )}
 
-      {/* Document Details: Title & Tags */}
+      {/* Document Details: Title & Tags placed neatly below recording card */}
       <div className="space-y-2">
         <input
           value={title}
@@ -761,25 +801,39 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
 
       <ErrorBox message={error} />
 
-      {/* Submit Button */}
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={busy || (subMode === "record" ? !recordedBlob : !uploadFile)}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
-      >
-        {busy ? (
-          <>
-            <Loader2 size={16} className="animate-spin" />
-            <span>{statusMessage || "Processing audio with Gemini..."}</span>
-          </>
-        ) : (
-          <>
-            <Sparkles size={16} />
-            <span>Transcribe & Generate Notes with Gemini</span>
-          </>
+      {/* Action Buttons */}
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={busy || (subMode === "record" ? !recordedBlob : !uploadFile)}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+        >
+          {busy ? (
+            <>
+              <Loader2 size={16} className="animate-spin" />
+              <span>{statusMessage || "Transcribing with Gemini 3.5 Transcribe & extracting notes..."}</span>
+            </>
+          ) : (
+            <>
+              <Sparkles size={16} />
+              <span>✨ Transcribe & Generate AI Notes</span>
+            </>
+          )}
+        </button>
+
+        {subMode === "record" && recordingState === "recorded" && fullTranscript.trim() && (
+          <button
+            type="button"
+            onClick={handleSaveDirectTranscript}
+            disabled={busy}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-zinc-300 bg-white py-2.5 text-xs font-semibold text-zinc-800 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          >
+            <FileText size={14} />
+            <span>📝 Save Live Transcript Directly</span>
+          </button>
         )}
-      </button>
+      </div>
     </div>
   );
 }
