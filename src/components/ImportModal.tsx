@@ -226,6 +226,8 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
   const streamRef = useRef<MediaStream | null>(null);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const recordingStateRef = useRef(recordingState);
+  recordingStateRef.current = recordingState;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const animFrameRef = useRef<number | null>(null);
@@ -313,6 +315,15 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
           recentAcc += e.results[i][0].transcript + " ";
         }
         setInterimText(recentAcc.trim());
+      };
+      rec.onend = () => {
+        if (recordingStateRef.current === "recording") {
+          try {
+            rec.start();
+          } catch {
+            // ignore
+          }
+        }
       };
       rec.start();
     } catch {
@@ -713,17 +724,26 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
                 />
               )}
 
-              {/* Live Recognized Speech preview if available */}
-              {fullTranscript && (
-                <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300">
-                  <div className="mb-1 flex items-center gap-1.5 font-semibold text-[11px] text-emerald-700 dark:text-emerald-400">
-                    <Radio size={12} /> Live Recognized Speech Preview
-                  </div>
-                  <p className="max-h-28 overflow-y-auto leading-relaxed whitespace-pre-wrap italic">
-                    “{fullTranscript}”
-                  </p>
+              {/* Live Recognized Speech preview & edit */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span className="flex items-center gap-1.5">
+                    <Radio size={12} /> {fullTranscript ? "Live Recognized Transcript (edit if needed):" : "Live Speech Transcript:"}
+                  </span>
+                  {fullTranscript && (
+                    <span className="font-normal text-[10px] text-zinc-400">
+                      Captured live · editable
+                    </span>
+                  )}
                 </div>
-              )}
+                <textarea
+                  value={fullTranscript}
+                  onChange={(e) => setFullTranscript(e.target.value)}
+                  rows={3}
+                  placeholder="No speech recognized live. Gemini 3.5 will transcribe the recorded audio when submitted."
+                  className="w-full rounded-xl border border-zinc-200 bg-zinc-50/80 p-2.5 text-xs text-zinc-800 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-200"
+                />
+              </div>
             </div>
           )}
         </div>

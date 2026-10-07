@@ -948,22 +948,15 @@ export function ReaderView({ docId }: { docId: string }) {
     const dur = origDuration || origAudioRef.current?.duration || 1;
     const targetChar = (origCurrentTime / Math.max(1, dur)) * totalChars;
 
-    const found = doc.sentences.find(
-      (s) => targetChar >= s.charStart && targetChar <= s.charEnd,
-    );
-    if (found) return found.idx;
-
-    let closestDist = Infinity;
-    let closestIdx = 0;
-    for (const s of doc.sentences) {
-      const mid = (s.charStart + s.charEnd) / 2;
-      const dist = Math.abs(mid - targetChar);
-      if (dist < closestDist) {
-        closestDist = dist;
-        closestIdx = s.idx;
+    for (let i = 0; i < doc.sentences.length; i++) {
+      const s = doc.sentences[i];
+      const nextStart = doc.sentences[i + 1]?.charStart ?? s.charEnd + 999999;
+      if (targetChar >= s.charStart && targetChar < nextStart) {
+        return s.idx;
       }
     }
-    return closestIdx;
+
+    return 0;
   }, [doc, playbackSource, player.currentIdx, origCurrentTime, origDuration]);
 
   // Compute synchronized karaoke active word index
