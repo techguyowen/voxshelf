@@ -4,10 +4,10 @@ import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { createDocument } from "@/lib/documents";
-import { transcribeAndNoteAudio } from "@/lib/gemini";
+import { transcribeAndNoteAudio, generateNotesFromTranscript } from "@/lib/gemini";
 import { apiError, toApiError } from "@/lib/http";
 import { RECORDINGS_DIR, ensureDirs } from "@/lib/paths";
-import type { AudioNoteMetadata, AudioNoteMode } from "@/lib/types";
+import type { AudioNoteMetadata, AudioNoteMode, AudioTranscribeAndNoteResult } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -112,15 +112,36 @@ export async function POST(req: NextRequest) {
     // Save audio recording permanently to disk
     writeFileSync(recordingPath, buffer);
 
-    const audioBase64 = buffer.toString("base64");
+    const providedTranscript = (formData.get("transcript") as string | null)?.trim();
 
-    // Call Gemini for speech transcription and note generation
-    const noteResult = await transcribeAndNoteAudio(
-      audioBase64,
-      mimeType,
-      mode,
-      explicitKey,
-    );
+    let noteResult: AudioTranscribeAndNoteResult;
+    if (providedTranscript && providedTranscript.length > 0) {
+      if (mode === "transcript-only") {
+        noteResult = {
+          title: customTitle || (isLive ? "Live Voice Note" : "Voice Note"),
+          transcript: providedTranscript,
+          summary: "Live voice transcript",
+          notes: providedTranscript,
+          actionItems: [],
+          keyPoints: [],
+        };
+      } else {
+        noteResult = await generateNotesFromTranscript(
+          providedTranscript,
+          mode,
+          explicitKey,
+        );
+      }
+    } else {
+      // No live transcript provided — upload audio to Gemini for speech-to-text
+      const audioBase64 = buffer.toString("base64");
+      noteResult = await transcribeAndNoteAudio(
+        audioBase64,
+        mimeType,
+        mode,
+        explicitKey,
+      );
+    }
 
     let document = null;
 

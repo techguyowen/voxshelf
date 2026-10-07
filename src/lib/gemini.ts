@@ -311,6 +311,62 @@ export async function transcribeAndNoteAudio(
   });
 }
 
+/** Generate structured notes directly from an existing transcript without re-uploading audio. */
+export async function generateNotesFromTranscript(
+  transcript: string,
+  mode: AudioNoteMode = "notes",
+  explicitKey?: string | null,
+): Promise<AudioTranscribeAndNoteResult> {
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+
+  let modeInstruction = "Analyze this spoken transcript and generate structured notes.";
+  if (mode === "meeting") {
+    modeInstruction =
+      "Analyze this transcript as a meeting. Generate an executive summary, structured discussion notes with headings, action items with owners, and key takeaways.";
+  } else if (mode === "lecture") {
+    modeInstruction =
+      "Analyze this transcript as an educational lecture. Generate a summary, structured study notes with concepts and definitions, action items, and key takeaways.";
+  } else {
+    modeInstruction =
+      "Analyze this spoken transcript. Generate a concise title, a summary, structured notes with markdown formatting, action items, and key points.";
+  }
+
+  const prompt =
+    `${modeInstruction}\n\nTranscript:\n${transcript}\n\n` +
+    "Return a valid JSON object matching the requested schema with properties: title, transcript, summary, notes, actionItems, keyPoints.";
+
+  const schema = {
+    type: "object",
+    properties: {
+      title: { type: "string" },
+      transcript: { type: "string" },
+      summary: { type: "string" },
+      notes: { type: "string" },
+      actionItems: { type: "array", items: { type: "string" } },
+      keyPoints: { type: "array", items: { type: "string" } },
+    },
+    required: ["title", "summary", "notes", "actionItems", "keyPoints"],
+  };
+
+  return tryEach(textModels(), async (model) => {
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema,
+      },
+    } as never);
+
+    const raw = partsText(response);
+    if (!raw) throw new GeminiError(`Model ${model} returned empty response.`);
+    const parsed = JSON.parse(extractJsonObject(raw));
+    parsed.transcript = parsed.transcript || transcript;
+    return normalizeAudioNotes(parsed);
+  });
+}
+
 /** OCR / transcription of an image with Gemini's vision understanding. */
 export async function transcribeImage(
   imageBase64: string,

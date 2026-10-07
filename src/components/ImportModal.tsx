@@ -440,9 +440,14 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
       return;
     }
 
+    const hasLiveTranscript = subMode === "record" && Boolean(fullTranscript.trim());
     setBusy(true);
     setError(null);
-    setStatusMessage("Transcribing with Gemini 3.5 Transcribe & extracting notes...");
+    setStatusMessage(
+      hasLiveTranscript
+        ? (noteMode === "transcript-only" ? "Saving live recording..." : "Extracting structured notes from live transcript with Gemini...")
+        : "Uploading audio and transcribing with Gemini 3.5..."
+    );
 
     try {
       const form = new FormData();
@@ -453,6 +458,9 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
 
       form.append("file", audioTarget, filename);
       form.append("mode", noteMode);
+      if (hasLiveTranscript) {
+        form.append("transcript", fullTranscript.trim());
+      }
       if (title.trim()) form.append("title", title.trim());
       if (tags.trim()) form.append("tags", tags.trim());
       form.append("recordedLive", subMode === "record" ? "1" : "0");
