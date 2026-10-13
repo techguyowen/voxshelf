@@ -14,6 +14,8 @@
     "desktop:dev": "electron .",
     "desktop:icons": "node scripts/make-icons.mjs",
     "desktop:build": "node scripts/electron-build.mjs",
+    "tauri:dev": "cargo tauri dev",
+    "tauri:build": "node scripts/tauri-build.mjs",
     "screenshots": "node scripts/capture-screenshots.mjs"
   },
   "build": {

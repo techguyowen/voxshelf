@@ -42,24 +42,24 @@ Open data folder** menu jumps straight there.
 
 ```bash
 npm install
-npm run dev            # terminal 1: Next.js on :48291
-npm run desktop:dev    # terminal 2: Electron window (expects the dev server)
-```
 
-Set `ELECTRON_START_URL` to point the window at another server.
+# Option A: Tauri v2 (Rust + Native Webview — ~50MB RAM)
+npm run tauri:dev
+
+# Option B: Electron (Legacy)
+npm run dev            # terminal 1: Next.js on :48291
+npm run desktop:dev    # terminal 2: Electron window
+```
 
 ## Building installers
 
 ```bash
-npm run desktop:build                # current OS
-node scripts/electron-build.mjs --mac --x64 --arm64
-node scripts/electron-build.mjs --win
-node scripts/electron-build.mjs --linux
-```
+# Tauri v2 native bundles (.app, .dmg on macOS; .exe on Win; .deb/.AppImage on Linux):
+npm run tauri:build
 
-This runs `next build`, stages the standalone server, and calls
-electron-builder. Installers land in `dist/` (git-ignored). CI builds all
-three platforms on every `main` push and attaches them to `v*` releases.
+# Electron installers (legacy):
+npm run desktop:build
+```
 
 ## Notes & troubleshooting
 
