@@ -571,7 +571,7 @@ function OriginalAudioPlayerBar({
           <div className="flex items-center gap-2 sm:gap-4">
             <button
               onClick={() => onSkip(-15)}
-              className="flex items-center gap-0.5 rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-0.5 rounded-lg text-zinc-600 hover:bg-zinc-100 active:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
               title="Skip back 15 seconds"
               aria-label="Skip back 15 seconds"
             >
@@ -581,7 +581,7 @@ function OriginalAudioPlayerBar({
 
             <button
               onClick={onTogglePlay}
-              className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600 text-white shadow hover:bg-emerald-700 active:scale-95 dark:bg-emerald-500 dark:text-zinc-950"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-600 text-white shadow hover:bg-emerald-700 active:scale-95 dark:bg-emerald-500 dark:text-zinc-950"
               aria-label={isPlaying ? "Pause" : "Play"}
             >
               {isPlaying ? <Pause size={20} /> : <Play size={20} className="ml-0.5" />}
@@ -589,7 +589,7 @@ function OriginalAudioPlayerBar({
 
             <button
               onClick={() => onSkip(15)}
-              className="flex items-center gap-0.5 rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-0.5 rounded-lg text-zinc-600 hover:bg-zinc-100 active:bg-zinc-200 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:active:bg-zinc-700"
               title="Skip forward 15 seconds"
               aria-label="Skip forward 15 seconds"
             >

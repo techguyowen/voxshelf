@@ -93,8 +93,20 @@ body {
   border-color: #2e3e52 !important;
 }
 
+.carolina.dark .dark\:border-zinc-600 {
+  border-color: #3b4e66 !important;
+}
+
 .carolina.dark .dark\:text-zinc-100 {
   color: #F0F6FC !important;
+}
+
+.carolina.dark .dark\:text-zinc-200 {
+  color: #E2E8F0 !important;
+}
+
+.carolina.dark .dark\:text-zinc-300 {
+  color: #CBD5E1 !important;
 }
 
 .carolina.dark .dark\:text-zinc-400,
@@ -118,6 +130,17 @@ body {
   color: #081018 !important;
 }
 
+.carolina .border-emerald-500,
+.carolina.dark .dark\:border-emerald-500,
+.carolina.dark .dark\:border-emerald-400 {
+  border-color: #7BAFD4 !important;
+}
+
+.carolina .ring-emerald-500,
+.carolina.dark .dark\:ring-emerald-500 {
+  --tw-ring-color: #7BAFD4 !important;
+}
+
 .carolina .text-emerald-500,
 .carolina .text-emerald-600,
 .carolina.dark .dark\:text-emerald-400,
@@ -126,10 +149,19 @@ body {
 }
 
 .carolina .bg-emerald-100,
+.carolina.dark .dark\:bg-emerald-950,
 .carolina.dark .dark\:bg-emerald-950\/70,
 .carolina.dark .dark\:bg-emerald-950\/50 {
   background-color: #12263A !important;
   color: #7BAFD4 !important;
+}
+
+.carolina .bg-cyan-100,
+.carolina.dark .dark\:bg-cyan-950,
+.carolina.dark .dark\:bg-cyan-950\/70,
+.carolina.dark .dark\:bg-cyan-950\/50 {
+  background-color: #142a42 !important;
+  color: #93BFDF !important;
 }
 
 .carolina.dark .vf-eq-bar {
@@ -139,6 +171,22 @@ body {
 .carolina input[type="range"],
 .carolina.dark input[type="range"] {
   accent-color: #7BAFD4 !important;
+}
+
+.carolina input[type="checkbox"]:checked {
+  accent-color: #7BAFD4 !important;
+}
+
+/* Card option & segmented control active styles in Carolina theme */
+.carolina.dark [role="tab"][aria-selected="true"],
+.carolina.dark [aria-pressed="true"] {
+  border-color: #7BAFD4 !important;
+  box-shadow: 0 0 0 1px rgba(123, 175, 212, 0.4) !important;
+}
+
+.carolina.dark article.group:hover {
+  border-color: #3b4e66 !important;
+  background-color: #141c2a !important;
 }
 
 /* ---- Karaoke reader sentences ---- */

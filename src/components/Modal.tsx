@@ -44,11 +44,14 @@ export function Modal({
           wide ? "sm:max-w-3xl" : "sm:max-w-lg"
         } animate-fade-up overflow-y-auto rounded-t-2xl bg-white shadow-xl sm:rounded-xl dark:bg-zinc-900`}
       >
+        <div className="flex shrink-0 items-center justify-center pt-2.5 sm:hidden" aria-hidden="true">
+          <span className="h-1.5 w-12 rounded-full bg-zinc-300 dark:bg-zinc-700" />
+        </div>
         <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-zinc-200 bg-white/95 px-4 py-3 backdrop-blur sm:px-6 dark:border-zinc-800 dark:bg-zinc-900/95">
           <h2 className="text-base font-semibold sm:text-lg">{title}</h2>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
             aria-label="Close"
           >
             <X size={20} />
