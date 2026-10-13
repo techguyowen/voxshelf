@@ -124,7 +124,10 @@ export function Library() {
   const [tag, setTag] = useState("");
   const [sort, setSort] = useState("updated");
   const [showArchived, setShowArchived] = useState(false);
-  const [view, setView] = useState<"grid" | "list">("grid");
+  const [view, setView] = useState<"grid" | "list">(() => {
+    if (typeof window === "undefined") return "grid";
+    return (localStorage.getItem("vs-library-view") as "grid" | "list") || "grid";
+  });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [folder, setFolder] = useState("");
@@ -571,7 +574,10 @@ export function Library() {
             <span className="hidden sm:inline">Reading Stats</span>
           </button>
           <button
-            onClick={() => setView("grid")}
+            onClick={() => {
+              setView("grid");
+              localStorage.setItem("vs-library-view", "grid");
+            }}
             className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 ${view === "grid" ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
             aria-label="Grid view"
             title="Grid view"
@@ -579,7 +585,10 @@ export function Library() {
             <LayoutGrid size={17} />
           </button>
           <button
-            onClick={() => setView("list")}
+            onClick={() => {
+              setView("list");
+              localStorage.setItem("vs-library-view", "list");
+            }}
             className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 ${view === "list" ? "bg-zinc-200 dark:bg-zinc-800" : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
             aria-label="List view"
             title="List view"
