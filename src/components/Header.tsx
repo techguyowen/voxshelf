@@ -1,6 +1,6 @@
 "use client";
 
-import { AudioLines, BarChart3, Keyboard, Lock, Moon, Plus, Settings, Sun } from "lucide-react";
+import { AudioLines, BarChart3, Github, Keyboard, Lock, Moon, Plus, Settings, Sun } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/client";
@@ -135,6 +135,17 @@ export function Header({
           >
             <Settings size={19} />
           </button>
+
+          <a
+            href="https://github.com/techguyowen/voxshelf"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            aria-label="GitHub repository"
+            title="GitHub repository"
+          >
+            <Github size={19} />
+          </a>
 
           {locked && (
             <button

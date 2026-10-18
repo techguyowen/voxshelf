@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   FolderOpen,
+  Github,
   KeyRound,
   Loader2,
   RefreshCw,
@@ -1002,6 +1003,28 @@ export function SettingsModal({
               Exports documents, reading progress and bookmarks. Audio cache is
               not included (it rebuilds on demand).
             </p>
+          </Section>
+
+          <Section title="About & Open Source">
+            <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800 dark:bg-zinc-900/50">
+              <div className="space-y-0.5">
+                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  VoxShelf v1.0.0
+                </p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Free and open source · Licensed under GNU AGPLv3
+                </p>
+              </div>
+              <a
+                href="https://github.com/techguyowen/voxshelf"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 self-start rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 sm:self-auto dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <Github size={14} />
+                GitHub Repository
+              </a>
+            </div>
           </Section>
 
           <div className="flex items-center justify-end gap-2 pt-1">

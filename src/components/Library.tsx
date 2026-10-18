@@ -8,6 +8,7 @@ import {
   FileText,
   Folder as FolderIcon,
   FolderPlus,
+  Github,
   Globe,
   LayoutGrid,
   Link2,
@@ -1081,6 +1082,21 @@ export function Library() {
           })}
         </div>
       )}
+
+      <footer className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-zinc-200 pt-6 pb-12 text-xs text-zinc-500 sm:flex-row dark:border-zinc-800 dark:text-zinc-400">
+        <p>
+          VoxShelf — Open-source AI speech reader · Licensed under GNU AGPLv3
+        </p>
+        <a
+          href="https://github.com/techguyowen/voxshelf"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex items-center gap-1.5 font-medium text-zinc-700 hover:text-emerald-600 dark:text-zinc-300 dark:hover:text-emerald-400"
+        >
+          <Github size={14} />
+          GitHub Repository
+        </a>
+      </footer>
 
       {folderModal && (
         <Modal title="New Folder" onClose={() => setFolderModal(false)}>
