@@ -11,7 +11,7 @@
 [![Gemini TTS](https://img.shields.io/badge/Gemini-3.1_/_3.8_TTS-8E75B2?logo=google&logoColor=white)](https://aistudio.google.com/)
 [![Gemini Text](https://img.shields.io/badge/Gemini-3.8_Text-8E75B2?logo=google&logoColor=white)](https://aistudio.google.com/)
 [![PWA](https://img.shields.io/badge/PWA-installable-5A0FC8?logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-emerald)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
 [![CI](https://github.com/techguyowen/voxshelf/actions/workflows/ci.yml/badge.svg)](https://github.com/techguyowen/voxshelf/actions/workflows/ci.yml)
 
 ---
@@ -439,4 +439,4 @@ npm run build
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+GNU Affero General Public License v3.0 (GNU AGPLv3) — see [LICENSE](LICENSE).

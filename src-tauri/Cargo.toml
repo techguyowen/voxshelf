@@ -4,6 +4,7 @@ version = "1.0.0"
 description = "VoxShelf - self-hostable text-to-speech app powered by Gemini"
 authors = ["VoxShelf"]
 edition = "2021"
+license = "AGPL-3.0-or-later"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

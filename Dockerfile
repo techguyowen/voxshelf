@@ -39,7 +39,7 @@ USER nextjs
 
 LABEL org.opencontainers.image.title="VoxShelf" \
   org.opencontainers.image.description="Self-hostable text-to-speech app powered by Gemini speech generation" \
-  org.opencontainers.image.licenses="MIT"
+  org.opencontainers.image.licenses="AGPL-3.0-or-later"
 
 EXPOSE 48291
 VOLUME /app/data

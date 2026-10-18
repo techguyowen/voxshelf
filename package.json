@@ -4,6 +4,7 @@
   "private": true,
   "description": "VoxShelf - self-hostable text-to-speech app powered by Gemini speech generation",
   "author": "VoxShelf",
+  "license": "AGPL-3.0-or-later",
   "desktopName": "app.voxshelf",
   "main": "electron/main.js",
   "scripts": {
