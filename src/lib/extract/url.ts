@@ -8,7 +8,7 @@ const UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36 VoxShelf/1.0";
 
 /** Hosts the URL importer must never fetch (SSRF guard). */
-function isBlockedHost(hostname: string): boolean {
+export function isBlockedHost(hostname: string): boolean {
   const host = hostname.trim().toLowerCase().replace(/\.$/, "").replace(/^\[|\]$/g, "");
   if (!host) return true;
   if (host === "metadata.google.internal" || host === "metadata.goog") return true;

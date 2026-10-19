@@ -436,21 +436,31 @@ export function updateDocument(
     params.push(patch.isArchived ? 1 : 0);
     touchUpdated = true;
   }
+  // metadata is set at most once: patch.dialogueActing merges into the
+  // patch.metadata object when both are provided, else into stored metadata.
+  let mergedMetadata: Record<string, unknown> | undefined;
   if (patch.metadata !== undefined) {
-    sets.push("metadata = ?");
-    params.push(JSON.stringify(patch.metadata || {}));
-    touchUpdated = true;
+    mergedMetadata = { ...((patch.metadata || {}) as Record<string, unknown>) };
   }
   if (patch.dialogueActing !== undefined) {
-    let currentMeta: Record<string, unknown> = {};
-    try {
-      if (existing.metadata) currentMeta = JSON.parse(existing.metadata);
-    } catch {
-      currentMeta = {};
+    if (mergedMetadata === undefined) {
+      mergedMetadata = {};
+      try {
+        if (existing.metadata) {
+          mergedMetadata = {
+            ...(JSON.parse(existing.metadata) as Record<string, unknown>),
+          };
+        }
+      } catch {
+        mergedMetadata = {};
+      }
     }
-    currentMeta.dialogueActing = patch.dialogueActing;
+    (mergedMetadata as Record<string, unknown>).dialogueActing =
+      patch.dialogueActing;
+  }
+  if (mergedMetadata !== undefined) {
     sets.push("metadata = ?");
-    params.push(JSON.stringify(currentMeta));
+    params.push(JSON.stringify(mergedMetadata));
     touchUpdated = true;
   }
   if (

@@ -540,7 +540,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       try {
         const clip = await ensureAudio(clamped);
         if (op !== opRef.current) return;
-        const audio = audioRef.current;
+        const audio = audioRef.current ?? getSharedAudio();
         if (!audio) throw new Error("Audio unavailable.");
         audio.src = clip.url;
         audio.playbackRate = speedRef.current;
@@ -606,10 +606,14 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   );
 
   const pause = useCallback(() => {
-    opRef.current += 1;
+    // Device pause is in-place (speechSynthesis.pause()/resume()): the op
+    // must stay unchanged so the utterance's onEnd still matches opRef and
+    // advances to the next sentence after resume.
+    const device = isDeviceVoice(voiceRef.current);
+    if (!device) opRef.current += 1;
     clearPendingPause();
     clearDeviceEstimate();
-    if (isDeviceVoice(voiceRef.current)) {
+    if (device) {
       speechRef.current?.pause();
       setStatus((s) => (s === "playing" || s === "loading" ? "paused" : s));
       reportProgress(currentIdxRef.current);
@@ -694,7 +698,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const skip = useCallback(
     async (seconds: number) => {
       const d = docRef.current;
-      const audio = audioRef.current;
+      const audio = audioRef.current ?? getSharedAudio();
       if (!d || !audio) return;
       clearPendingPause();
       // Device engine: utterances can't be scrubbed, so second-skips step
@@ -842,7 +846,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         setSleepLeft(left);
         // Smooth linear fade-out over the final 60 seconds, relative to the
         // user's chosen base volume, so expiry never cuts audio abruptly.
-        applySleepFadedVolume(audioRef.current, left);
+        applySleepFadedVolume(audioRef.current ?? getSharedAudio(), left);
         if (left <= 0 && sleepTickRef.current) {
           clearInterval(sleepTickRef.current);
           sleepTickRef.current = null;

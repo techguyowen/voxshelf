@@ -508,6 +508,27 @@ export function dbRun(sql: string, ...params: unknown[]): RunResult {
 }
 
 /**
+ * Run `fn` inside a single SQLite transaction (all-or-nothing).
+ * Rolls back and rethrows on any error.
+ */
+export function dbTransaction<T>(fn: () => T): T {
+  const db = getDb();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const out = fn();
+    db.exec("COMMIT");
+    return out;
+  } catch (err) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback errors; the original error is what matters.
+    }
+    throw err;
+  }
+}
+
+/**
  * Record a delete so two-way sync can propagate it. Keeps the newest
  * deleted_at per row; tombstones are never pruned automatically (see SYNC.md).
  */

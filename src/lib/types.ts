@@ -46,6 +46,8 @@ export interface Sentence {
   charEnd: number;
   audioHash: string | null;
   audioDurationMs: number | null;
+  /** True when the sentence was preceded by a newline in the source text. */
+  isParagraphStart?: boolean;
 }
 
 export interface Bookmark {
@@ -335,16 +337,15 @@ export function clampParagraphPauseMs(v: number): number {
 }
 
 /**
- * Paragraph-break heuristic from sentence char offsets: consecutive sentences
- * within one paragraph are separated by a single space (a char gap of 1), so
- * a larger gap implies newline(s) between them.
+ * True when `next` starts a new paragraph, as recorded at split time by
+ * splitSentences (a newline preceded the sentence in the source text).
  */
 export function startsNewParagraph(
   prev: Sentence | undefined,
   next: Sentence | undefined,
 ): boolean {
   if (!prev || !next) return false;
-  return next.charStart - prev.charEnd > 1;
+  return next.isParagraphStart ?? false;
 }
 
 export type ReaderFont = "sans" | "serif" | "mono" | "dyslexic";

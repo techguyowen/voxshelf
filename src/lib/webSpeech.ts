@@ -148,6 +148,9 @@ function clampVolume(volume: number): number {
  */
 export class WebSpeechPlayer {
   private generation = 0;
+  // Chromium can GC a locally-scoped utterance mid-speech, cutting audio
+  // off early. Holding a strong reference until end/error/cancel prevents it.
+  private activeUtterance: SpeechSynthesisUtterance | null = null;
 
   speak(
     sentence: WebSpeechSentence,
@@ -185,18 +188,22 @@ export class WebSpeechPlayer {
     };
     utterance.onend = () => {
       if (gen !== this.generation) return;
+      this.activeUtterance = null;
       callbacks.onEnd?.();
     };
     utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
       if (gen !== this.generation) return;
+      this.activeUtterance = null;
       callbacks.onError?.(
         new Error(`On-device speech failed (${event.error}).`),
       );
     };
 
+    this.activeUtterance = utterance;
     try {
       synth.speak(utterance);
     } catch (err) {
+      this.activeUtterance = null;
       callbacks.onError?.(err);
     }
   }
@@ -221,6 +228,7 @@ export class WebSpeechPlayer {
 
   cancel(): void {
     this.generation += 1;
+    this.activeUtterance = null;
     if (!isWebSpeechSupported()) return;
     try {
       window.speechSynthesis.cancel();

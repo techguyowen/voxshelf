@@ -43,6 +43,8 @@ export interface SplitSentence {
   text: string;
   start: number;
   end: number;
+  /** True when the sentence was preceded by a newline in the raw input. */
+  isParagraphStart?: boolean;
 }
 
 function protect(text: string): string {
@@ -66,9 +68,31 @@ function restore(text: string): string {
 /**
  * Split text into sentences, tracking char offsets into the normalized text.
  * Normalization collapses whitespace runs (including newlines) to single spaces.
+ * Each sentence records whether a newline preceded it in the raw input
+ * (isParagraphStart), so paragraph pauses don't rely on char-gap heuristics.
  */
 export function splitSentences(input: string): SplitSentence[] {
-  const normalized = input.replace(/\s+/g, " ").trim();
+  // Normalize exactly like input.replace(/\s+/g, " ").trim(), while mapping
+  // every normalized offset back to the raw offset it came from.
+  const normToRaw: number[] = [];
+  let normalized = "";
+  let i = 0;
+  while (i < input.length && /\s/.test(input[i])) i++;
+  let pendingSpaceRaw = -1;
+  for (; i < input.length; i++) {
+    const ch = input[i];
+    if (/\s/.test(ch)) {
+      if (pendingSpaceRaw < 0) pendingSpaceRaw = i;
+      continue;
+    }
+    if (pendingSpaceRaw >= 0) {
+      normalized += " ";
+      normToRaw.push(pendingSpaceRaw);
+      pendingSpaceRaw = -1;
+    }
+    normalized += ch;
+    normToRaw.push(i);
+  }
   if (!normalized) return [];
 
   const guarded = protect(normalized);
@@ -84,7 +108,16 @@ export function splitSentences(input: string): SplitSentence[] {
     const start = normalized.indexOf(sentence, cursor);
     const safeStart = start >= 0 ? start : cursor;
     const end = safeStart + sentence.length;
-    result.push({ text: sentence, start: safeStart, end });
+    // A newline anywhere in the raw gap between the previous sentence and
+    // this one means a new paragraph. The first sentence never qualifies.
+    let isParagraphStart = false;
+    if (result.length > 0) {
+      const rawEnd = normToRaw[cursor - 1] !== undefined ? normToRaw[cursor - 1] + 1 : 0;
+      const rawStart = normToRaw[safeStart] ?? input.length;
+      isParagraphStart =
+        rawStart > rawEnd && input.slice(rawEnd, rawStart).includes("\n");
+    }
+    result.push({ text: sentence, start: safeStart, end, isParagraphStart });
     cursor = end;
   }
   return result;

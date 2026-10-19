@@ -1,8 +1,9 @@
 import { randomUUID } from "crypto";
 import { JSDOM } from "jsdom";
-import { dbAll, dbGet, dbRun } from "./db";
+import { dbAll, dbGet, dbRun, dbTransaction } from "./db";
 import { createDocument, getDocumentDetail } from "./documents";
 import { extractFromUrl } from "./extract";
+import { isBlockedHost } from "./extract/url";
 import type { DocumentSummary, Feed, FeedItem } from "./types";
 
 export interface ParsedFeedItem {
@@ -209,8 +210,10 @@ export function parseFeedXml(xml: string): ParsedFeed {
       linkEls.find((l) => !l.getAttribute("rel")) ||
       linkEls[0];
     if (altLink) {
-      siteUrl =
+      const rawSite =
         altLink.getAttribute("href") || altLink.textContent?.trim() || null;
+      siteUrl =
+        rawSite && /^https?:\/\//i.test(rawSite) ? rawSite : null;
     }
 
     const feedDesc =
@@ -230,7 +233,11 @@ export function parseFeedXml(xml: string): ParsedFeed {
         entryLinks.find((l) => !l.getAttribute("rel")) ||
         entryLinks[0];
 
-      let url = entryLink?.getAttribute("href") || entryLink?.textContent?.trim() || "";
+      // Only http(s) URLs are ever stored; javascript:/data: links and
+      // non-URL ids (e.g. tag: URIs) must never become clickable hrefs.
+      const rawLink =
+        entryLink?.getAttribute("href") || entryLink?.textContent?.trim() || "";
+      let url = /^https?:\/\//i.test(rawLink) ? rawLink : "";
 
       const guid =
         getTagText(entry, "id") ||
@@ -285,6 +292,65 @@ const FEED_FETCH_HEADERS = {
     "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html;q=0.9, */*;q=0.8",
 };
 
+const FEED_FETCH_TIMEOUT_MS = 10_000;
+const MAX_FEED_BYTES = 5 * 1024 * 1024;
+
+/**
+ * SSRF-guarded feed download: rejects non-http(s) URLs and blocked hosts,
+ * enforces a 10s timeout, rejects oversized Content-Length headers, and
+ * caps the actually-read body at 5MB.
+ */
+async function fetchFeedXml(url: string, verb: string): Promise<string> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("That doesn't look like a valid feed URL.");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Only http(s) feed URLs are supported.");
+  }
+  if (isBlockedHost(parsed.hostname)) {
+    throw new Error("Feed URL host is not allowed.");
+  }
+
+  const res = await fetch(url, {
+    headers: FEED_FETCH_HEADERS,
+    signal: AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS),
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      `Failed to ${verb} feed: HTTP ${res.status} ${res.statusText}`,
+    );
+  }
+
+  const declared = res.headers.get("content-length");
+  if (declared && Number(declared) > MAX_FEED_BYTES) {
+    throw new Error("Feed is too large (max 5 MB).");
+  }
+
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_FEED_BYTES) {
+      try {
+        await reader.cancel();
+      } catch {
+        // ignore
+      }
+      throw new Error("Feed is too large (max 5 MB).");
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
 /**
  * Fetches feed XML via fetch, parses it, inserts/updates feeds row,
  * inserts feed_items (ignoring duplicates), and returns the Feed with items.
@@ -293,16 +359,7 @@ export async function subscribeFeed(feedUrl: string): Promise<{ feed: Feed; item
   const trimmedUrl = feedUrl.trim();
   new URL(trimmedUrl); // throws if invalid URL
 
-  const res = await fetch(trimmedUrl, {
-    headers: FEED_FETCH_HEADERS,
-    signal: AbortSignal.timeout(20000),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to fetch feed: HTTP ${res.status} ${res.statusText}`);
-  }
-
-  const xml = await res.text();
+  const xml = await fetchFeedXml(trimmedUrl, "fetch");
   const parsed = parseFeedXml(xml);
 
   const existingFeed = dbGet<{ id: string }>("SELECT id FROM feeds WHERE url = ?", trimmedUrl);
@@ -333,31 +390,33 @@ export async function subscribeFeed(feedUrl: string): Promise<{ feed: Feed; item
     );
   }
 
-  for (const item of parsed.items) {
-    const guidOrUrl = item.guid || item.url;
-    const existing = dbGet<{ id: string }>(
-      "SELECT id FROM feed_items WHERE feed_id = ? AND (guid = ? OR url = ?)",
-      feedId,
-      guidOrUrl,
-      item.url,
-    );
-    if (!existing) {
-      const itemId = randomUUID();
-      dbRun(
-        `INSERT INTO feed_items (id, feed_id, guid, title, url, author, summary, published_at, is_read, doc_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
-        itemId,
+  dbTransaction(() => {
+    for (const item of parsed.items) {
+      const guidOrUrl = item.guid || item.url;
+      const existing = dbGet<{ id: string }>(
+        "SELECT id FROM feed_items WHERE feed_id = ? AND (guid = ? OR url = ?)",
         feedId,
         guidOrUrl,
-        item.title,
         item.url,
-        item.author,
-        item.summary,
-        item.publishedAt || now,
-        now,
       );
+      if (!existing) {
+        const itemId = randomUUID();
+        dbRun(
+          `INSERT INTO feed_items (id, feed_id, guid, title, url, author, summary, published_at, is_read, doc_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
+          itemId,
+          feedId,
+          guidOrUrl,
+          item.title,
+          item.url,
+          item.author,
+          item.summary,
+          item.publishedAt || now,
+          now,
+        );
+      }
     }
-  }
+  });
 
   const feedRow = dbGet<FeedRow>(
     `SELECT f.*,
@@ -383,16 +442,7 @@ export async function refreshFeed(feedId: string): Promise<{ ok: boolean; added:
     throw new Error("Feed not found");
   }
 
-  const res = await fetch(feed.url, {
-    headers: FEED_FETCH_HEADERS,
-    signal: AbortSignal.timeout(20000),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Failed to refresh feed: HTTP ${res.status} ${res.statusText}`);
-  }
-
-  const xml = await res.text();
+  const xml = await fetchFeedXml(feed.url, "refresh");
   const parsed = parseFeedXml(xml);
   const now = new Date().toISOString();
 
@@ -406,32 +456,34 @@ export async function refreshFeed(feedId: string): Promise<{ ok: boolean; added:
   );
 
   let added = 0;
-  for (const item of parsed.items) {
-    const guidOrUrl = item.guid || item.url;
-    const existing = dbGet<{ id: string }>(
-      "SELECT id FROM feed_items WHERE feed_id = ? AND (guid = ? OR url = ?)",
-      feedId,
-      guidOrUrl,
-      item.url,
-    );
-    if (!existing) {
-      const itemId = randomUUID();
-      dbRun(
-        `INSERT INTO feed_items (id, feed_id, guid, title, url, author, summary, published_at, is_read, doc_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
-        itemId,
+  dbTransaction(() => {
+    for (const item of parsed.items) {
+      const guidOrUrl = item.guid || item.url;
+      const existing = dbGet<{ id: string }>(
+        "SELECT id FROM feed_items WHERE feed_id = ? AND (guid = ? OR url = ?)",
         feedId,
         guidOrUrl,
-        item.title,
         item.url,
-        item.author,
-        item.summary,
-        item.publishedAt || now,
-        now,
       );
-      added++;
+      if (!existing) {
+        const itemId = randomUUID();
+        dbRun(
+          `INSERT INTO feed_items (id, feed_id, guid, title, url, author, summary, published_at, is_read, doc_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)`,
+          itemId,
+          feedId,
+          guidOrUrl,
+          item.title,
+          item.url,
+          item.author,
+          item.summary,
+          item.publishedAt || now,
+          now,
+        );
+        added++;
+      }
     }
-  }
+  });
 
   return { ok: true, added };
 }
