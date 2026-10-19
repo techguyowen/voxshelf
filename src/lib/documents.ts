@@ -50,6 +50,7 @@ interface SentenceRow {
   text: string;
   char_start: number;
   char_end: number;
+  is_paragraph_start?: number;
   audio_hash: string | null;
   audio_duration_ms: number | null;
 }
@@ -142,6 +143,7 @@ function toSentence(row: SentenceRow): Sentence {
     text: row.text,
     charStart: row.char_start,
     charEnd: row.char_end,
+    isParagraphStart: row.is_paragraph_start === 1,
     audioHash: row.audio_hash,
     audioDurationMs: row.audio_duration_ms,
   };
@@ -204,13 +206,19 @@ export interface CreateDocumentInput {
 }
 
 export function createDocument(input: CreateDocumentInput): DocumentSummary {
+  // Split the raw text so newline-based paragraph detection works;
+  // splitSentences normalizes whitespace internally for offsets.
+  const sentences = splitSentences(input.text);
+  if (sentences.length === 0) {
+    if (!input.text.replace(/\s+/g, " ").trim()) {
+      throw new Error("Document text is empty.");
+    }
+    throw new Error("No readable sentences found.");
+  }
   const text = input.text.replace(/\s+/g, " ").trim();
-  if (!text) throw new Error("Document text is empty.");
   if (text.length > 2_000_000) {
     throw new Error("Document is too large (max ~2M characters).");
   }
-  const sentences = splitSentences(text);
-  if (sentences.length === 0) throw new Error("No readable sentences found.");
 
   const id = input.id?.trim() || randomUUID();
   const ts = nowIso();
@@ -254,10 +262,10 @@ export function createDocument(input: CreateDocumentInput): DocumentSummary {
   );
 
   const stmt = getDb().prepare(
-    "INSERT INTO sentences (doc_id, idx, text, char_start, char_end) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO sentences (doc_id, idx, text, char_start, char_end, is_paragraph_start) VALUES (?, ?, ?, ?, ?, ?)",
   );
   sentences.forEach((s, i) => {
-    stmt.run(id, i, s.text, s.start, s.end);
+    stmt.run(id, i, s.text, s.start, s.end, s.isParagraphStart ? 1 : 0);
   });
 
   const created = dbGet<DocumentRow>("SELECT * FROM documents WHERE id = ?", id);

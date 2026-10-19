@@ -90,6 +90,8 @@ export async function POST(
     body.voice && isValidVoice(body.voice) ? body.voice : doc.voice;
   const style = (body.stylePrompt ?? doc.stylePrompt ?? "").trim();
   const targets = doc.sentences.slice(startIndex, startIndex + count);
+  const dialogueActing = doc.dialogueActing;
+  const isDialogueEnabled = dialogueActing ? dialogueActing.enabled !== false : false;
 
   const encoder = new TextEncoder();
   const signal = req.signal;
@@ -125,7 +127,8 @@ export async function POST(
           for (;;) {
             if (aborted()) return;
             try {
-              const result = await synthesizeAndCache(s.text, voice, style);
+              const sentenceVoice = (isDialogueEnabled && dialogueActing?.tags.find(t => t.sentenceIdx === s.idx)?.voice) || voice;
+              const result = await synthesizeAndCache(s.text, sentenceVoice, style);
               updateSentenceAudio(id, s.idx, result.hash, result.durationMs);
               completed += 1;
               totalDurationMs += result.durationMs;

@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS sentences (
   text TEXT NOT NULL,
   char_start INTEGER NOT NULL DEFAULT 0,
   char_end INTEGER NOT NULL DEFAULT 0,
+  is_paragraph_start INTEGER NOT NULL DEFAULT 0,
   audio_hash TEXT,
   audio_duration_ms INTEGER,
   PRIMARY KEY (doc_id, idx),
@@ -420,6 +421,21 @@ const MIGRATIONS: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_feed_items_feed ON feed_items(feed_id);
         CREATE INDEX IF NOT EXISTS idx_feed_items_published ON feed_items(published_at);
       `);
+    },
+  },
+  {
+    version: 8,
+    name: "add_is_paragraph_start_and_feed_indexes",
+    up: (db) => {
+      addColumnIfNotExists(
+        db,
+        "sentences",
+        "is_paragraph_start",
+        "INTEGER NOT NULL DEFAULT 0",
+      );
+      db.exec(
+        "CREATE INDEX IF NOT EXISTS idx_feed_items_feed_guid ON feed_items(feed_id, guid); CREATE INDEX IF NOT EXISTS idx_feed_items_feed_url ON feed_items(feed_id, url);",
+      );
     },
   },
 ];

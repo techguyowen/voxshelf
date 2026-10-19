@@ -30,9 +30,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const style = sp.get("style") ?? doc.stylePrompt ?? "";
     if (!isValidVoice(voice)) return apiError("Unknown voice.", 400);
 
+    const dialogueActing = doc.dialogueActing;
+    const isDialogueEnabled = dialogueActing ? dialogueActing.enabled !== false : false;
+
     const parts: Buffer[] = [];
     for (const s of doc.sentences) {
-      const result = await synthesizeAndCache(s.text, voice, style);
+      const sentenceVoice = (isDialogueEnabled && dialogueActing?.tags.find(t => t.sentenceIdx === s.idx)?.voice) || voice;
+      const result = await synthesizeAndCache(s.text, sentenceVoice, style);
       updateSentenceAudio(id, s.idx, result.hash, result.durationMs);
       const cached = getCachedAudio(result.hash);
       const filePath = cached ? cached.filePath : audioFilePath(result.hash);

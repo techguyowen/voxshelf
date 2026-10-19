@@ -319,6 +319,17 @@ async function fetchFeedXml(url: string, verb: string): Promise<string> {
     signal: AbortSignal.timeout(FEED_FETCH_TIMEOUT_MS),
   });
 
+  if (res.url) {
+    try {
+      const finalUrl = new URL(res.url);
+      if (isBlockedHost(finalUrl.hostname)) {
+        throw new Error("Feed redirected to a disallowed host.");
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("disallowed")) throw e;
+    }
+  }
+
   if (!res.ok) {
     throw new Error(
       `Failed to ${verb} feed: HTTP ${res.status} ${res.statusText}`,
