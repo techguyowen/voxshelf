@@ -111,7 +111,7 @@ export function Header({
 
           <button
             onClick={onShortcuts}
-            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            className="hidden rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 md:flex dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
             aria-label="Keyboard shortcuts"
             title="Keyboard shortcuts (?)"
           >
@@ -120,7 +120,7 @@ export function Header({
 
           <button
             onClick={openStats}
-            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            className="hidden rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 md:flex dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
             aria-label="Reading stats"
             title="Reading stats"
           >
@@ -140,7 +140,7 @@ export function Header({
             href="https://github.com/techguyowen/voxshelf"
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            className="hidden rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 lg:flex dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
             aria-label="GitHub repository"
             title="GitHub repository"
           >
@@ -159,11 +159,13 @@ export function Header({
           )}
 
           <button
-            onClick={onImport}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+            onClick={() => onImport()}
+            className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 active:scale-95 transition dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+            aria-label="Import document (I)"
+            title="Import document (I)"
           >
             <Plus size={17} strokeWidth={2.5} />
-            <span className="hidden sm:inline">Import</span>
+            <span>Import</span>
           </button>
         </div>
       </div>

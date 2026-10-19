@@ -507,3 +507,13 @@ textarea {
     scroll-behavior: auto !important;
   }
 }
+
+/* Hide scrollbars on pill/tab rails while keeping scrollability. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

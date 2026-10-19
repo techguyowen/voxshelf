@@ -14,7 +14,6 @@ import {
   GraduationCap,
   Headphones,
   Image as ImageIcon,
-  Link2,
   Loader2,
   Mic,
   Pause,
@@ -37,16 +36,15 @@ import type { AudioNoteMode, ExtractResult, Feed, FeedItem, SourceType } from "@
 import { countWords } from "@/lib/text";
 import { Modal } from "./Modal";
 
-type Tab = "audio" | "upload" | "scan" | "rss" | "gdocs" | "article" | "paste";
+type Tab = "upload" | "article" | "audio" | "rss" | "paste" | "scan";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: "upload", label: "Upload File", icon: <FileUp size={16} /> },
+  { id: "article", label: "Web & Docs", icon: <Globe size={16} /> },
   { id: "audio", label: "Voice & Audio", icon: <Mic size={16} /> },
-  { id: "upload", label: "Upload", icon: <FileUp size={16} /> },
-  { id: "scan", label: "Scan / OCR", icon: <ScanLine size={16} /> },
   { id: "rss", label: "RSS & Feeds", icon: <Rss size={16} /> },
-  { id: "gdocs", label: "Google Docs", icon: <Link2 size={16} /> },
-  { id: "article", label: "Web Article", icon: <Globe size={16} /> },
   { id: "paste", label: "Paste Text", icon: <ClipboardPaste size={16} /> },
+  { id: "scan", label: "Scan / OCR", icon: <ScanLine size={16} /> },
 ];
 
 const inputCls =
@@ -1175,19 +1173,14 @@ function ScanTab({ onSaved }: { onSaved: (id: string) => void }) {
   );
 }
 
-function UrlTab({
-  onSaved,
-  kind,
-}: {
-  onSaved: (id: string) => void;
-  kind: "gdocs" | "article";
-}) {
+function UrlTab({ onSaved }: { onSaved: (id: string) => void }) {
   const [url, setUrl] = useState("");
   const [cleanup, setCleanup] = useState(false);
   const [result, setResult] = useState<ExtractResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isGdocs = /docs\.google\.com/i.test(url.trim());
 
   async function extract() {
     if (!url.trim()) {
@@ -1238,11 +1231,7 @@ function UrlTab({
           }}
           type="url"
           inputMode="url"
-          placeholder={
-            kind === "gdocs"
-              ? "https://docs.google.com/document/d/…"
-              : "https://example.com/article"
-          }
+          placeholder="Paste an article link or Google Docs link…"
           className={inputCls}
           spellCheck={false}
         />
@@ -1255,10 +1244,22 @@ function UrlTab({
           Import
         </button>
       </div>
+      {url.trim() && (
+        <span
+          className={`inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+            isGdocs
+              ? "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300"
+              : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+          }`}
+        >
+          <Globe size={11} />
+          {isGdocs ? "Google Docs link detected" : "Web article link detected"}
+        </span>
+      )}
       <p className="text-xs text-zinc-500 dark:text-zinc-400">
-        {kind === "gdocs"
-          ? "The doc must be shared as “Anyone with the link can view”. Private docs can't be imported."
-          : "Reader view is extracted automatically. Paywalled or JavaScript-heavy pages may fail."}
+        Google Docs links must be shared as “Anyone with the link can view”.
+        Reader view is extracted automatically — paywalled or JavaScript-heavy
+        pages may fail.
       </p>
       <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
         <input
@@ -1273,7 +1274,7 @@ function UrlTab({
       {result && (
         <ExtractPreview
           result={result}
-          sourceLabel={kind === "gdocs" ? "Google Docs" : "Web article"}
+          sourceLabel={result.sourceType === "url-gdocs" ? "Google Docs" : "Web article"}
           onSave={save}
           saving={saving}
         />
@@ -1907,8 +1908,16 @@ function RssTab({ onSaved }: { onSaved: (id: string) => void }) {
   );
 }
 
-export function ImportModal({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>("upload");
+export function ImportModal({
+  onClose,
+  initialTab,
+}: {
+  onClose: () => void;
+  initialTab?: string;
+}) {
+  const [tab, setTab] = useState<Tab>(() =>
+    TABS.some((t) => t.id === initialTab) ? (initialTab as Tab) : "upload",
+  );
   const router = useRouter();
 
   function onSaved(id: string) {
@@ -1919,30 +1928,28 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal title="Import to VoxShelf" onClose={onClose} wide>
-      <div className="mb-4 flex gap-1 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
+      <div className="no-scrollbar mb-4 flex gap-1 overflow-x-auto rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-2 text-xs font-medium sm:text-sm ${
+            className={`flex min-h-[40px] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-xs font-medium sm:text-sm ${
               tab === t.id
                 ? "bg-white text-zinc-900 shadow dark:bg-zinc-950 dark:text-zinc-100"
                 : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
             }`}
           >
             {t.icon}
-            <span className="hidden sm:inline">{t.label}</span>
-            <span className="sm:hidden">{t.label.split(" ")[0]}</span>
+            {t.label}
           </button>
         ))}
       </div>
-      {tab === "audio" && <AudioTab onSaved={onSaved} />}
       {tab === "upload" && <UploadTab onSaved={onSaved} />}
-      {tab === "scan" && <ScanTab onSaved={onSaved} />}
+      {tab === "article" && <UrlTab onSaved={onSaved} />}
+      {tab === "audio" && <AudioTab onSaved={onSaved} />}
       {tab === "rss" && <RssTab onSaved={onSaved} />}
-      {tab === "gdocs" && <UrlTab kind="gdocs" onSaved={onSaved} />}
-      {tab === "article" && <UrlTab kind="article" onSaved={onSaved} />}
       {tab === "paste" && <PasteTab onSaved={onSaved} />}
+      {tab === "scan" && <ScanTab onSaved={onSaved} />}
     </Modal>
   );
 }

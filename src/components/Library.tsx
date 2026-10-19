@@ -25,7 +25,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, downloadTextFile, formatBytes, safeFilename } from "@/lib/client";
 import {
   getOfflineDocument,
@@ -153,6 +153,8 @@ export function Library() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
+  const [libDragOver, setLibDragOver] = useState(false);
+  const dragDepth = useRef(0);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 300);
@@ -543,8 +545,48 @@ export function Library() {
     }
   }
 
+  function hasFiles(e: React.DragEvent): boolean {
+    return Array.from(e.dataTransfer.types).includes("Files");
+  }
+
   return (
-    <div className={selected.size > 0 ? "pb-28 pt-5" : "pt-5"}>
+    <div
+      className={`relative ${selected.size > 0 ? "pb-28 pt-5" : "pt-5"}`}
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current += 1;
+        setLibDragOver(true);
+      }}
+      onDragOver={(e) => {
+        if (hasFiles(e)) e.preventDefault();
+      }}
+      onDragLeave={(e) => {
+        if (!hasFiles(e)) return;
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (dragDepth.current === 0) setLibDragOver(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current = 0;
+        setLibDragOver(false);
+        if (e.dataTransfer.files?.length) openImport("upload");
+      }}
+    >
+      {libDragOver && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-emerald-600/10 p-4 dark:bg-emerald-500/10">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-emerald-500 bg-white/95 px-10 py-12 text-center shadow-xl dark:bg-zinc-900/95">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+              <Plus size={28} strokeWidth={2.5} />
+            </span>
+            <p className="text-lg font-semibold">Drop file to import to VoxShelf</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              PDF · EPUB · DOCX · TXT · MD · Images
+            </p>
+          </div>
+        </div>
+      )}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <h1 className="text-xl font-bold tracking-tight sm:text-2xl">Library</h1>
         <span className="rounded-full bg-zinc-200 px-2 py-0.5 text-xs font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
@@ -730,6 +772,15 @@ export function Library() {
             <Archive size={15} />
             <span className="hidden sm:inline">Archived</span>
           </button>
+          <button
+            onClick={() => openImport()}
+            className="flex min-h-[44px] items-center gap-1.5 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 active:scale-95 transition dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+            title="Import document (I)"
+            aria-label="Import document"
+          >
+            <Plus size={16} strokeWidth={2.5} />
+            <span>Import</span>
+          </button>
         </div>
       </div>
 
@@ -824,7 +875,7 @@ export function Library() {
               </p>
             </div>
             <button
-              onClick={openImport}
+              onClick={() => openImport()}
               className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
             >
               <Plus size={16} /> Import something

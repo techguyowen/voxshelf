@@ -20,7 +20,7 @@ import { SettingsModal } from "./SettingsModal";
 import { StatsModal } from "./StatsModal";
 
 interface UIContextValue {
-  openImport: () => void;
+  openImport: (tab?: string) => void;
   openSettings: () => void;
   /** Bumped whenever settings are saved, so indicators refresh. */
   settingsRev: number;
@@ -55,6 +55,7 @@ function isTypingTarget(el: EventTarget | null): boolean {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [importOpen, setImportOpen] = useState(false);
+  const [importTab, setImportTab] = useState<string | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -74,7 +75,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     void refreshAuth();
   }, []);
 
-  const openImport = useCallback(() => setImportOpen(true), []);
+  const openImport = useCallback((tab?: string) => {
+    setImportTab(tab);
+    setImportOpen(true);
+  }, []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
@@ -104,6 +108,26 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Global "I" opens Import; Cmd/Ctrl+I works even while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isI = e.key === "i" || e.key === "I";
+      if (!isI) return;
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod) {
+        e.preventDefault();
+        openImport();
+        return;
+      }
+      if (e.altKey) return;
+      if (isTypingTarget(e.target)) return;
+      e.preventDefault();
+      openImport();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openImport]);
 
   const value = useMemo(
     () => ({
@@ -156,7 +180,15 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="mx-auto w-full max-w-6xl px-3 pb-24 sm:px-6">
         {children}
       </main>
-      {importOpen && <ImportModal onClose={() => setImportOpen(false)} />}
+      {importOpen && (
+        <ImportModal
+          initialTab={importTab}
+          onClose={() => {
+            setImportOpen(false);
+            setImportTab(undefined);
+          }}
+        />
+      )}
       {settingsOpen && (
         <SettingsModal
           onClose={() => setSettingsOpen(false)}
