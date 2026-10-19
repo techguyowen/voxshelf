@@ -1,6 +1,6 @@
 "use client";
 
-import { AudioLines, BarChart3, Github, Keyboard, Lock, Moon, Plus, Settings, Sun } from "lucide-react";
+import { AudioLines, BarChart3, Github, HelpCircle, Keyboard, Lock, Moon, Plus, Settings, Sun } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/client";
@@ -19,7 +19,7 @@ export function Header({
   settingsRev: number;
 }) {
   const { theme, toggle } = useTheme();
-  const { openStats } = useUI();
+  const { openStats, openTutorial } = useUI();
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [locked, setLocked] = useState(false);
 
@@ -125,6 +125,15 @@ export function Header({
             title="Reading stats"
           >
             <BarChart3 size={19} />
+          </button>
+
+          <button
+            onClick={openTutorial}
+            className="rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            aria-label="Product Guide & Tutorial"
+            title="Product Guide & Tutorial"
+          >
+            <HelpCircle size={19} />
           </button>
 
           <button

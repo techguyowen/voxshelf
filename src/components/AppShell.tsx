@@ -18,6 +18,7 @@ import { ImportModal } from "./ImportModal";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
 import { SettingsModal } from "./SettingsModal";
 import { StatsModal } from "./StatsModal";
+import { TutorialModal } from "./TutorialModal";
 
 interface UIContextValue {
   openImport: (tab?: string) => void;
@@ -29,6 +30,7 @@ interface UIContextValue {
   openShortcuts: () => void;
   closeShortcuts: () => void;
   openStats: () => void;
+  openTutorial: () => void;
 }
 
 const UIContext = createContext<UIContextValue>({
@@ -40,6 +42,7 @@ const UIContext = createContext<UIContextValue>({
   openShortcuts: () => {},
   closeShortcuts: () => {},
   openStats: () => {},
+  openTutorial: () => {},
 });
 
 export function useUI() {
@@ -59,6 +62,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const [settingsRev, setSettingsRev] = useState(0);
   const [auth, setAuth] = useState<{ locked: boolean; authed: boolean } | null>(null);
 
@@ -83,6 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const openShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
   const openStats = useCallback(() => setStatsOpen(true), []);
+  const openTutorial = useCallback(() => setTutorialOpen(true), []);
   const bumpSettings = useCallback(
     () => setSettingsRev((r) => r + 1),
     [],
@@ -139,6 +144,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       openShortcuts,
       closeShortcuts,
       openStats,
+      openTutorial,
     }),
     [
       openImport,
@@ -149,6 +155,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       openShortcuts,
       closeShortcuts,
       openStats,
+      openTutorial,
     ],
   );
 
@@ -199,6 +206,19 @@ export function AppShell({ children }: { children: ReactNode }) {
         <KeyboardShortcutsModal onClose={closeShortcuts} />
       )}
       {statsOpen && <StatsModal onClose={() => setStatsOpen(false)} />}
+      {tutorialOpen && (
+        <TutorialModal
+          onClose={() => setTutorialOpen(false)}
+          onOpenImport={() => {
+            setTutorialOpen(false);
+            openImport();
+          }}
+          onOpenSettings={() => {
+            setTutorialOpen(false);
+            openSettings();
+          }}
+        />
+      )}
       <FloatingMiniPlayer />
     </UIContext.Provider>
     </ToastProvider>

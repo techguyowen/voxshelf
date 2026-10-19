@@ -10,6 +10,7 @@ import {
   FolderPlus,
   Github,
   Globe,
+  HelpCircle,
   LayoutGrid,
   Link2,
   List,
@@ -113,7 +114,7 @@ function timeAgo(iso: string): string {
 }
 
 export function Library() {
-  const { openImport, openStats } = useUI();
+  const { openImport, openStats, openTutorial } = useUI();
   const toast = useToast();
   const router = useRouter();
   const [docs, setDocs] = useState<DocumentSummary[]>([]);
@@ -609,6 +610,15 @@ export function Library() {
             {selectMode ? "Done" : "Select"}
           </button>
           <button
+            onClick={openTutorial}
+            className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            title="Product Guide & Tutorial"
+            aria-label="Product Guide & Tutorial"
+          >
+            <HelpCircle size={15} />
+            <span className="hidden sm:inline">Guide</span>
+          </button>
+          <button
             onClick={openStats}
             className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             title="Reading stats, streaks and history"
@@ -874,12 +884,20 @@ export function Library() {
                 Import a PDF, article, scan or paste text to start listening.
               </p>
             </div>
-            <button
-              onClick={() => openImport()}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
-            >
-              <Plus size={16} /> Import something
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                onClick={() => openImport()}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+              >
+                <Plus size={16} /> Import something
+              </button>
+              <button
+                onClick={openTutorial}
+                className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                📖 Quickstart Guide
+              </button>
+            </div>
           </div>
         )
       ) : (
