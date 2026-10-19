@@ -5,7 +5,9 @@ import type {
   AuthStatus,
   Bookmark,
   CacheStats,
+  CharacterVoiceAssignment,
   ChatMessage,
+  DialogueAnalysisResult,
   DocumentDetail,
   DocumentSummary,
   ExtractResult,
@@ -230,6 +232,23 @@ export const api = {
     send<PodcastEpisode>("/api/ai/podcast", "POST", input),
   listPodcasts: (docId: string) =>
     get<{ podcasts: PodcastEpisode[] }>(`/api/ai/podcast?documentId=${encodeURIComponent(docId)}`),
+
+  analyzeDialogue: (docId: string, key?: string) =>
+    send<{ documentId: string; analysis: DialogueAnalysisResult }>(
+      "/api/ai/dialogue",
+      "POST",
+      { documentId: docId, key },
+    ),
+  updateDialogueVoices: (
+    docId: string,
+    characters: CharacterVoiceAssignment[],
+    enabled?: boolean,
+  ) =>
+    send<{ success: boolean; documentId: string; analysis: DialogueAnalysisResult }>(
+      "/api/ai/dialogue",
+      "PUT",
+      { documentId: docId, characters, enabled },
+    ),
 
   listBookmarks: (docId: string) =>
     get<{ bookmarks: Bookmark[] }>(`/api/documents/${docId}/bookmarks`),

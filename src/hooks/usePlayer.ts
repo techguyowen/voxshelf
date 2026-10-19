@@ -36,6 +36,8 @@ export interface UsePlayerOpts {
   filterSentence?: SentenceFilter;
   /** Fired when playback auto-falls-back to on-device speech (no API key). */
   onDeviceFallback?: () => void;
+  /** Optional override for multi-character dialogue acting playback. Defaults to doc.dialogueActing.enabled. */
+  dialogueActingEnabled?: boolean;
 }
 
 interface Clip {
@@ -188,6 +190,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const onProgressRef = useRef(opts.onProgress);
   const filterRef = useRef(opts.filterSentence);
   const onDeviceFallbackRef = useRef(opts.onDeviceFallback);
+  const dialogueActingOptRef = useRef(opts.dialogueActingEnabled);
   const speechRef = useRef<WebSpeechPlayer | null>(null);
   const advanceRef = useRef<() => void>(() => {});
   const deviceEstimateRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -221,6 +224,31 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   onProgressRef.current = opts.onProgress;
   filterRef.current = opts.filterSentence;
   onDeviceFallbackRef.current = opts.onDeviceFallback;
+  dialogueActingOptRef.current = opts.dialogueActingEnabled;
+
+  const isDialogueActingActive = useCallback((): boolean => {
+    const d = docRef.current;
+    if (!d?.dialogueActing) return false;
+    if (dialogueActingOptRef.current !== undefined) {
+      return dialogueActingOptRef.current;
+    }
+    return d.dialogueActing.enabled !== false;
+  }, []);
+
+  const resolveSentenceVoice = useCallback(
+    (idx: number): string => {
+      const d = docRef.current;
+      const v = voiceRef.current;
+      if (!d) return v;
+      const enabled = isDialogueActingActive();
+      const sentenceVoice =
+        (enabled &&
+          d.dialogueActing?.tags.find((t) => t.sentenceIdx === idx)?.voice) ||
+        v;
+      return sentenceVoice;
+    },
+    [isDialogueActingActive],
+  );
 
   /** Speakable text for a sentence after the auto-skip filter. */
   const speakText = useCallback((idx: number): string => {
@@ -270,8 +298,11 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   );
 
   const cacheKey = useCallback(
-    (idx: number) => `${docRef.current?.id}:${idx}:${voiceRef.current}:${styleRef.current}`,
-    [],
+    (idx: number) => {
+      const v = resolveSentenceVoice(idx);
+      return `${docRef.current?.id}:${idx}:${v}:${styleRef.current}`;
+    },
+    [resolveSentenceVoice],
   );
 
   const ensureAudio = useCallback(
@@ -281,7 +312,8 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         return Promise.reject(new Error("Sentence out of range."));
       }
       const speak = speakText(idx);
-      const key = `${d.id}:${idx}:${voiceRef.current}:${styleRef.current}:${speak.length}:${speak.slice(0, 48)}`;
+      const sentenceVoice = resolveSentenceVoice(idx);
+      const key = `${d.id}:${idx}:${sentenceVoice}:${styleRef.current}:${speak.length}:${speak.slice(0, 48)}`;
       const hit = cacheRef.current.get(key);
       if (hit) return Promise.resolve(hit);
       const pending = inflightRef.current.get(key);
@@ -293,7 +325,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         const sentence = docRef.current?.sentences[idx];
         const hash = sentence?.audioHash;
         const voiceMatches =
-          voiceRef.current === docRef.current?.voice &&
+          sentenceVoice === docRef.current?.voice &&
           (styleRef.current || "") ===
             (docRef.current?.stylePrompt || "");
         if (hash && voiceMatches && typeof caches !== "undefined") {
@@ -314,7 +346,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         }
         const res = await api.tts({
           text: speak,
-          voice: voiceRef.current,
+          voice: sentenceVoice,
           stylePrompt: styleRef.current || undefined,
         });
         const clip = { url: res.url, durationMs: res.durationMs };
@@ -326,7 +358,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       inflightRef.current.set(key, p);
       return p;
     },
-    [speakText],
+    [speakText, resolveSentenceVoice],
   );
 
   const reportProgress = useCallback((idx: number) => {
@@ -1131,6 +1163,8 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     setSleep,
     dismissError,
     resync,
+    resolveSentenceVoice,
+    currentSentenceVoice: resolveSentenceVoice(currentIdx),
   };
 }
 

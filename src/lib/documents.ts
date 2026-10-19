@@ -4,6 +4,7 @@ import { countWords, splitSentences } from "./text";
 import type {
   AudioNoteMetadata,
   Bookmark,
+  DialogueAnalysisResult,
   DocumentDetail,
   DocumentSummary,
   Folder,
@@ -14,6 +15,10 @@ import type {
 } from "./types";
 import { DEFAULT_VOICE, isValidVoice } from "./voices";
 import { getDefaultSpeed, getDefaultVoice } from "./settings";
+
+export interface DocumentMetadata extends AudioNoteMetadata {
+  dialogueActing?: DialogueAnalysisResult | null;
+}
 
 interface DocumentRow {
   id: string;
@@ -88,11 +93,11 @@ export function parseTags(json: string | null): string[] {
   }
 }
 
-export function parseMetadata(json?: string | null): AudioNoteMetadata | null {
+export function parseMetadata(json?: string | null): DocumentMetadata | null {
   if (!json) return null;
   try {
     const v: unknown = JSON.parse(json);
-    return typeof v === "object" && v !== null ? (v as AudioNoteMetadata) : null;
+    return typeof v === "object" && v !== null ? (v as DocumentMetadata) : null;
   } catch {
     return null;
   }
@@ -101,7 +106,7 @@ export function parseMetadata(json?: string | null): AudioNoteMetadata | null {
 function toSummary(row: DocumentRow & { cached_sentences?: number }): DocumentSummary {
   const cached =
     typeof row.cached_sentences === "number" ? row.cached_sentences : undefined;
-  const audioMeta = parseMetadata(row.metadata);
+  const docMeta = parseMetadata(row.metadata);
   return {
     id: row.id,
     title: row.title,
@@ -125,8 +130,9 @@ function toSummary(row: DocumentRow & { cached_sentences?: number }): DocumentSu
     isArchived: row.is_archived === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    originalAudioUrl: audioMeta?.originalAudioUrl ?? null,
-    audioNotes: audioMeta,
+    originalAudioUrl: docMeta?.originalAudioUrl ?? null,
+    audioNotes: docMeta,
+    dialogueActing: docMeta?.dialogueActing ?? null,
   };
 }
 
@@ -315,13 +321,37 @@ export function getDocumentDetail(id: string): DocumentDetail | null {
   ).map(toSentence);
   const bookmarks = listBookmarks(id);
   const highlights = listHighlights(id);
+  const docMeta = parseMetadata(row.metadata);
   return {
     ...toSummary(row),
     stylePrompt: row.style_prompt,
     sentences,
     bookmarks,
     highlights,
+    dialogueActing: docMeta?.dialogueActing ?? null,
   };
+}
+
+export function saveDocumentDialogue(
+  docId: string,
+  analysis: DialogueAnalysisResult,
+): void {
+  const existing = dbGet<DocumentRow>("SELECT * FROM documents WHERE id = ?", docId);
+  if (!existing) throw new Error("Document not found.");
+  let currentMeta: Record<string, unknown> = {};
+  try {
+    if (existing.metadata) currentMeta = JSON.parse(existing.metadata);
+  } catch {
+    currentMeta = {};
+  }
+  currentMeta.dialogueActing = analysis;
+  const metaJson = JSON.stringify(currentMeta);
+  dbRun(
+    "UPDATE documents SET metadata = ?, updated_at = ? WHERE id = ?",
+    metaJson,
+    nowIso(),
+    docId,
+  );
 }
 
 export function getDocumentText(id: string): string | null {
@@ -343,7 +373,8 @@ export interface UpdateDocumentPatch {
   progressSentenceIndex?: number;
   progressCharOffset?: number;
   isArchived?: boolean;
-  metadata?: AudioNoteMetadata | Record<string, unknown> | null;
+  metadata?: DocumentMetadata | Record<string, unknown> | null;
+  dialogueActing?: DialogueAnalysisResult | null;
 }
 
 export function updateDocument(
@@ -408,6 +439,18 @@ export function updateDocument(
   if (patch.metadata !== undefined) {
     sets.push("metadata = ?");
     params.push(JSON.stringify(patch.metadata || {}));
+    touchUpdated = true;
+  }
+  if (patch.dialogueActing !== undefined) {
+    let currentMeta: Record<string, unknown> = {};
+    try {
+      if (existing.metadata) currentMeta = JSON.parse(existing.metadata);
+    } catch {
+      currentMeta = {};
+    }
+    currentMeta.dialogueActing = patch.dialogueActing;
+    sets.push("metadata = ?");
+    params.push(JSON.stringify(currentMeta));
     touchUpdated = true;
   }
   if (

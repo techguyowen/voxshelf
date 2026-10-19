@@ -1,6 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
 import { getTextModel, getTtsModel, resolveApiKey } from "./settings";
-import type { AudioNoteMode, AudioTranscribeAndNoteResult } from "./types";
+import type {
+  AudioNoteMode,
+  AudioTranscribeAndNoteResult,
+  CharacterVoiceAssignment,
+  DialogueAnalysisResult,
+  SentenceDialogueTag,
+} from "./types";
+import { DEFAULT_VOICE, VOICE_NAMES } from "./voices";
 
 export class GeminiError extends Error {
   status: number;
@@ -705,3 +712,299 @@ export async function explainSelection(
     (context ? `Surrounding text: "${context.slice(0, 1200)}"` : "");
   return generateText(prompt, explicitKey);
 }
+
+const FEMALE_VOICES = [
+  "Aoede",
+  "Leda",
+  "Callirrhoe",
+  "Despina",
+  "Erinome",
+  "Autonoe",
+  "Laomedeia",
+  "Vindemiatrix",
+  "Pulcherrima",
+];
+
+const MALE_VOICES = [
+  "Puck",
+  "Fenrir",
+  "Charon",
+  "Orus",
+  "Iapetus",
+  "Algenib",
+  "Rasalgethi",
+  "Gacrux",
+  "Algieba",
+  "Enceladus",
+];
+
+const NEUTRAL_VOICES = [
+  "Zephyr",
+  "Kore",
+  "Achernar",
+  "Schedar",
+  "Sadaltager",
+  "Sulafat",
+];
+
+/**
+ * Analyze document dialogue with Gemini to detect characters and map
+ * every sentence to its speaker with complementary distinct prebuilt voices.
+ */
+export async function analyzeDocumentDialogue(
+  title: string,
+  sentences: { idx: number; text: string }[],
+  defaultVoice: string,
+  explicitKey?: string | null,
+): Promise<DialogueAnalysisResult> {
+  const validDefaultVoice = VOICE_NAMES.includes(defaultVoice)
+    ? defaultVoice
+    : DEFAULT_VOICE;
+
+  if (sentences.length === 0) {
+    return {
+      characters: [
+        { character: "Narrator", voice: validDefaultVoice, gender: "neutral" },
+      ],
+      tags: [],
+      enabled: true,
+    };
+  }
+
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+
+  // Prioritize gemini-3.8-flash for structured dialogue analysis
+  const models = [
+    "gemini-3.8-flash",
+    ...textModels().filter((m) => m !== "gemini-3.8-flash"),
+  ];
+
+  // Chunk sentences to prevent exceeding output token limits on long texts
+  const CHUNK_SIZE = 150;
+  const chunks: Array<{ idx: number; text: string }[]> = [];
+  for (let i = 0; i < sentences.length; i += CHUNK_SIZE) {
+    chunks.push(sentences.slice(i, i + CHUNK_SIZE));
+  }
+
+  const rawCharactersMap = new Map<
+    string,
+    { gender?: "male" | "female" | "neutral"; suggestedVoice?: string }
+  >();
+  rawCharactersMap.set("Narrator", {
+    gender: "neutral",
+    suggestedVoice: validDefaultVoice,
+  });
+
+  const rawTags: Array<{
+    sentenceIdx: number;
+    character: string;
+    isDialogue: boolean;
+  }> = [];
+
+  for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
+    const chunk = chunks[cIdx];
+    const existingKnownChars = Array.from(rawCharactersMap.keys()).join(", ");
+    const prompt =
+      `You are an expert dramatic audio director analyzing a story/document for multi-character text-to-speech voice acting.\n` +
+      `Identify the characters and map each sentence index [idx] to its speaker.\n\n` +
+      `Guidelines:\n` +
+      `1. There is ALWAYS a "Narrator" who speaks narration, descriptive prose, exposition, and dialogue attribution tags (e.g. "he said").\n` +
+      `2. For direct dialogue (sentences with spoken quotes or lines delivered in dialogue), identify the character speaking (e.g. "Alice", "Sherlock Holmes", "Dr. Watson"). If uncertain, use a concise role title (e.g. "Guard", "Shopkeeper") or "Narrator".\n` +
+      `3. For each character, infer their likely gender ("male", "female", or "neutral").\n` +
+      `4. Map each sentence by index [idx] to { "sentenceIdx": number, "character": string, "isDialogue": boolean }.\n` +
+      (existingKnownChars
+        ? `Previously identified characters in this document: ${existingKnownChars}\n`
+        : "") +
+      `Document Title: "${title}"\n\n` +
+      `Sentences:\n` +
+      chunk.map((s) => `[${s.idx}] ${s.text}`).join("\n") +
+      `\n\nReturn ONLY a valid JSON object matching this schema:\n` +
+      `{\n` +
+      `  "characters": [{ "character": "Alice", "gender": "female" }],\n` +
+      `  "tags": [{ "sentenceIdx": 0, "character": "Narrator", "isDialogue": false }]\n` +
+      `}`;
+
+    const chunkResult = await tryEach(models, async (model) => {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json" },
+      } as never);
+      const raw = partsText(response);
+      if (!raw) {
+        throw new GeminiError(
+          `Model ${model} returned empty dialogue analysis.`,
+        );
+      }
+      return JSON.parse(extractJsonObject(raw)) as {
+        characters?: Array<{
+          character?: string;
+          gender?: string;
+          voice?: string;
+        }>;
+        tags?: Array<{
+          sentenceIdx?: number;
+          character?: string;
+          isDialogue?: boolean;
+        }>;
+      };
+    });
+
+    if (chunkResult.characters && Array.isArray(chunkResult.characters)) {
+      for (const ch of chunkResult.characters) {
+        if (!ch || typeof ch.character !== "string") continue;
+        const name = ch.character.trim();
+        if (!name) continue;
+        const normName =
+          name.toLowerCase() === "narrator" ? "Narrator" : name;
+        const gender =
+          ch.gender === "female" || ch.gender === "male" || ch.gender === "neutral"
+            ? ch.gender
+            : "neutral";
+        const suggestedVoice =
+          typeof ch.voice === "string" && VOICE_NAMES.includes(ch.voice)
+            ? ch.voice
+            : undefined;
+        if (!rawCharactersMap.has(normName)) {
+          rawCharactersMap.set(normName, { gender, suggestedVoice });
+        }
+      }
+    }
+
+    if (chunkResult.tags && Array.isArray(chunkResult.tags)) {
+      for (const t of chunkResult.tags) {
+        if (!t || typeof t.sentenceIdx !== "number") continue;
+        const rawName =
+          typeof t.character === "string" && t.character.trim()
+            ? t.character.trim()
+            : "Narrator";
+        const charName =
+          rawName.toLowerCase() === "narrator" ? "Narrator" : rawName;
+        rawTags.push({
+          sentenceIdx: t.sentenceIdx,
+          character: charName,
+          isDialogue: Boolean(t.isDialogue),
+        });
+        if (!rawCharactersMap.has(charName)) {
+          rawCharactersMap.set(charName, { gender: "neutral" });
+        }
+      }
+    }
+  }
+
+  // Voice allocation: assign distinct complementary Gemini prebuilt voices
+  const usedVoices = new Set<string>();
+  usedVoices.add(validDefaultVoice);
+
+  let femaleIdx = 0;
+  let maleIdx = 0;
+  let neutralIdx = 0;
+  let allVoiceIdx = 0;
+
+  const characters: CharacterVoiceAssignment[] = [];
+  const charVoiceMap = new Map<string, string>();
+
+  // Ensure Narrator is first with the default voice
+  characters.push({
+    character: "Narrator",
+    voice: validDefaultVoice,
+    gender: "neutral",
+  });
+  charVoiceMap.set("Narrator", validDefaultVoice);
+
+  for (const [charName, meta] of rawCharactersMap.entries()) {
+    if (charName === "Narrator") continue;
+    let assignedVoice: string | undefined;
+
+    if (meta.suggestedVoice && !usedVoices.has(meta.suggestedVoice)) {
+      assignedVoice = meta.suggestedVoice;
+    }
+
+    if (!assignedVoice) {
+      if (meta.gender === "female") {
+        while (femaleIdx < FEMALE_VOICES.length) {
+          const v = FEMALE_VOICES[femaleIdx++];
+          if (!usedVoices.has(v)) {
+            assignedVoice = v;
+            break;
+          }
+        }
+      } else if (meta.gender === "male") {
+        while (maleIdx < MALE_VOICES.length) {
+          const v = MALE_VOICES[maleIdx++];
+          if (!usedVoices.has(v)) {
+            assignedVoice = v;
+            break;
+          }
+        }
+      } else {
+        while (neutralIdx < NEUTRAL_VOICES.length) {
+          const v = NEUTRAL_VOICES[neutralIdx++];
+          if (!usedVoices.has(v)) {
+            assignedVoice = v;
+            break;
+          }
+        }
+      }
+    }
+
+    // Fallback: pick any unused Gemini prebuilt voice
+    if (!assignedVoice) {
+      while (allVoiceIdx < VOICE_NAMES.length) {
+        const v = VOICE_NAMES[allVoiceIdx++];
+        if (!usedVoices.has(v)) {
+          assignedVoice = v;
+          break;
+        }
+      }
+    }
+
+    // Final fallback
+    if (!assignedVoice) {
+      assignedVoice =
+        meta.gender === "female"
+          ? "Aoede"
+          : meta.gender === "male"
+            ? "Puck"
+            : "Zephyr";
+    }
+
+    usedVoices.add(assignedVoice);
+    charVoiceMap.set(charName, assignedVoice);
+    characters.push({
+      character: charName,
+      voice: assignedVoice,
+      gender: meta.gender ?? "neutral",
+    });
+  }
+
+  // Create lookup for tagged sentences and backfill any missing ones
+  const tagMap = new Map<number, { character: string; isDialogue: boolean }>();
+  for (const t of rawTags) {
+    tagMap.set(t.sentenceIdx, {
+      character: t.character,
+      isDialogue: t.isDialogue,
+    });
+  }
+
+  const tags: SentenceDialogueTag[] = sentences.map((s) => {
+    const found = tagMap.get(s.idx);
+    const character = found ? found.character : "Narrator";
+    const isDialogue = found ? found.isDialogue : false;
+    const voice = charVoiceMap.get(character) || validDefaultVoice;
+    return {
+      sentenceIdx: s.idx,
+      character,
+      voice,
+      isDialogue,
+    };
+  });
+
+  return {
+    characters,
+    tags,
+    enabled: true,
+  };
+}
+

@@ -100,6 +100,26 @@ export interface DocumentSummary {
   updatedAt: string;
   originalAudioUrl?: string | null;
   audioNotes?: AudioNoteMetadata | null;
+  dialogueActing?: DialogueAnalysisResult | null;
+}
+
+export interface CharacterVoiceAssignment {
+  character: string;
+  voice: string;
+  gender?: "male" | "female" | "neutral";
+}
+
+export interface SentenceDialogueTag {
+  sentenceIdx: number;
+  character: string;
+  voice: string;
+  isDialogue: boolean;
+}
+
+export interface DialogueAnalysisResult {
+  characters: CharacterVoiceAssignment[];
+  tags: SentenceDialogueTag[];
+  enabled?: boolean;
 }
 
 export interface DocumentDetail extends DocumentSummary {
@@ -107,6 +127,7 @@ export interface DocumentDetail extends DocumentSummary {
   sentences: Sentence[];
   bookmarks: Bookmark[];
   highlights: Highlight[];
+  dialogueActing?: DialogueAnalysisResult | null;
 }
 
 export interface VoiceInfo {

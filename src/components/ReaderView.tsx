@@ -67,8 +67,10 @@ import type {
   PrerenderStats,
   ReaderPrefs,
   Sentence,
+  SentenceDialogueTag,
 } from "@/lib/types";
 import { AIDrawer, type TextSelection } from "./AIDrawer";
+import { DialogueCastModal } from "./DialogueCastModal";
 import { DownloadToDeviceModal } from "./DownloadToDeviceModal";
 import { TOCDrawer } from "./TOCDrawer";
 import { PrerenderModal } from "./PrerenderModal";
@@ -306,6 +308,7 @@ const SentenceItem = memo(function SentenceItem({
   highlights,
   bionic,
   dimmed,
+  dialogueTag,
   onPlay,
 }: {
   sentence: Sentence;
@@ -319,6 +322,7 @@ const SentenceItem = memo(function SentenceItem({
   highlights: Highlight[];
   bionic: boolean;
   dimmed: boolean;
+  dialogueTag?: SentenceDialogueTag | null;
   onPlay: (idx: number) => void;
 }) {
   return (
@@ -329,6 +333,21 @@ const SentenceItem = memo(function SentenceItem({
       style={clickable ? undefined : { cursor: "default" }}
       title={skipped ? "Skipped by auto-skip" : clickable ? "Click to play from here" : undefined}
     >
+      {dialogueTag && (
+        <span
+          className={`mr-1.5 inline-flex select-none items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold tracking-wide align-baseline ${
+            dialogueTag.isDialogue
+              ? "border border-purple-200/70 bg-purple-100 text-purple-800 dark:border-purple-800/60 dark:bg-purple-950/80 dark:text-purple-300"
+              : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+          }`}
+          title={`Speaker: ${dialogueTag.character} (Voice: ${dialogueTag.voice})`}
+        >
+          <span role="img" aria-hidden="true" className="text-[10px]">
+            {dialogueTag.isDialogue ? "🎭" : "📖"}
+          </span>
+          {dialogueTag.character}:
+        </span>
+      )}
       {active ? (
         <WordSpans text={displayText} activeWord={activeWord} bionic={bionic} />
       ) : (
@@ -663,6 +682,7 @@ export function ReaderView({ docId }: { docId: string }) {
   const [aiOpen, setAiOpen] = useState(false);
   const [aiTab, setAiTab] = useState<AiTab>("summary");
   const [tocOpen, setTocOpen] = useState(false);
+  const [castOpen, setCastOpen] = useState(false);
 
   const hasOriginalAudio = Boolean(doc?.originalAudioUrl);
   const [playbackSource, setPlaybackSource] = useState<"original" | "gemini">("original");
@@ -933,6 +953,15 @@ export function ReaderView({ docId }: { docId: string }) {
     },
     [autoSkip],
   );
+
+  const dialogueTagsBySentence = useMemo(() => {
+    const map = new Map<number, SentenceDialogueTag>();
+    if (!doc?.dialogueActing || doc.dialogueActing.enabled === false) return map;
+    for (const tag of doc.dialogueActing.tags || []) {
+      map.set(tag.sentenceIdx, tag);
+    }
+    return map;
+  }, [doc?.dialogueActing]);
 
   const player = usePlayer(doc, { onProgress: persistProgress, filterSentence });
 
@@ -1507,7 +1536,8 @@ export function ReaderView({ docId }: { docId: string }) {
   keyHandlerRef.current = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (e.key === "Escape") {
-      if (aiOpen) setAiOpen(false);
+      if (castOpen) setCastOpen(false);
+      else if (aiOpen) setAiOpen(false);
       else if (tocOpen) setTocOpen(false);
       else if (showAutoSkip) setShowAutoSkip(false);
       else if (showAppearance) setShowAppearance(false);
@@ -1601,6 +1631,7 @@ export function ReaderView({ docId }: { docId: string }) {
           }
         } else if (k === "m") toggleMute();
         else if (k === "t") setTocOpen((v) => !v);
+        else if (k === "c") setCastOpen((v) => !v);
         break;
       }
     }
@@ -1715,6 +1746,26 @@ export function ReaderView({ docId }: { docId: string }) {
         >
           <StickyNote size={15} />
           <span className="hidden sm:inline">Notes</span>
+        </button>
+        <button
+          onClick={() => setCastOpen(true)}
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+            doc.dialogueActing && doc.dialogueActing.enabled !== false
+              ? "bg-purple-100 text-purple-800 hover:bg-purple-200 dark:bg-purple-950/70 dark:text-purple-300 dark:hover:bg-purple-900"
+              : "text-zinc-600 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          }`}
+          aria-label="Cast / Dialogue Acting"
+          title="Cast / Dialogue Acting (🎭)"
+        >
+          <span role="img" aria-hidden="true">
+            🎭
+          </span>
+          <span className="hidden sm:inline">Cast</span>
+          {doc.dialogueActing && doc.dialogueActing.characters.length > 0 && (
+            <span className="rounded-full bg-purple-200/80 px-1 text-[10px] tabular-nums font-bold text-purple-800 dark:bg-purple-900 dark:text-purple-200">
+              {doc.dialogueActing.characters.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => openAi("summary")}
@@ -1997,6 +2048,7 @@ export function ReaderView({ docId }: { docId: string }) {
               highlights={highlightsBySentence.get(s.idx) || []}
               bionic={prefs.bionicReading}
               dimmed={prefs.focusMask}
+              dialogueTag={dialogueTagsBySentence.get(s.idx) || null}
               onPlay={handlePlay}
             />
           );
@@ -2185,6 +2237,12 @@ export function ReaderView({ docId }: { docId: string }) {
         onDeleteHighlight={deleteHighlight}
         onUpdateHighlight={updateHighlight}
         initialTab={aiTab}
+      />
+      <DialogueCastModal
+        open={castOpen}
+        onClose={() => setCastOpen(false)}
+        doc={doc}
+        onUpdateDoc={(updated) => setDoc(updated)}
       />
     </div>
   );
