@@ -6,11 +6,13 @@ import {
   Camera,
   CheckCircle2,
   ClipboardPaste,
+  ExternalLink,
   FileAudio,
   FileText,
   FileUp,
   Globe,
   GraduationCap,
+  Headphones,
   Image as ImageIcon,
   Link2,
   Loader2,
@@ -18,26 +20,30 @@ import {
   Pause,
   Play,
   Radio,
+  RefreshCw,
   RotateCcw,
+  Rss,
   ScanLine,
   Sparkles,
   Square,
+  Trash2,
   TriangleAlert,
   Volume2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api, formatBytes } from "@/lib/client";
-import type { AudioNoteMode, ExtractResult, SourceType } from "@/lib/types";
+import type { AudioNoteMode, ExtractResult, Feed, FeedItem, SourceType } from "@/lib/types";
 import { countWords } from "@/lib/text";
 import { Modal } from "./Modal";
 
-type Tab = "audio" | "upload" | "scan" | "gdocs" | "article" | "paste";
+type Tab = "audio" | "upload" | "scan" | "rss" | "gdocs" | "article" | "paste";
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: "audio", label: "Voice & Audio", icon: <Mic size={16} /> },
   { id: "upload", label: "Upload", icon: <FileUp size={16} /> },
   { id: "scan", label: "Scan / OCR", icon: <ScanLine size={16} /> },
+  { id: "rss", label: "RSS & Feeds", icon: <Rss size={16} /> },
   { id: "gdocs", label: "Google Docs", icon: <Link2 size={16} /> },
   { id: "article", label: "Web Article", icon: <Globe size={16} /> },
   { id: "paste", label: "Paste Text", icon: <ClipboardPaste size={16} /> },
@@ -1574,6 +1580,333 @@ function PasteTab({ onSaved }: { onSaved: (id: string) => void }) {
   );
 }
 
+const PRESET_FEEDS = [
+  { name: "TechCrunch", url: "https://techcrunch.com/feed/" },
+  { name: "Hacker News Top", url: "https://news.ycombinator.com/rss" },
+  { name: "Ars Technica", url: "https://feeds.arstechnica.com/arstechnica/index" },
+  { name: "BBC News", url: "https://feeds.bbci.co.uk/news/rss.xml" },
+];
+
+function RssTab({ onSaved }: { onSaved: (id: string) => void }) {
+  const [feeds, setFeeds] = useState<Feed[]>([]);
+  const [items, setItems] = useState<FeedItem[]>([]);
+  const [selectedFeedId, setSelectedFeedId] = useState<string | null>(null);
+  const [urlInput, setUrlInput] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [subscribing, setSubscribing] = useState(false);
+  const [refreshingFeedId, setRefreshingFeedId] = useState<string | null>(null);
+  const [importingItemId, setImportingItemId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadData = async (feedId?: string | null) => {
+    try {
+      setLoading(true);
+      setError(null);
+      const data = await api.listFeeds({ feedId: feedId || undefined });
+      setFeeds(data.feeds);
+      setItems(data.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load feeds");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData(selectedFeedId);
+  }, [selectedFeedId]);
+
+  const handleSubscribe = async (feedUrlToSub?: string) => {
+    const target = (feedUrlToSub || urlInput).trim();
+    if (!target) return;
+    try {
+      setSubscribing(true);
+      setError(null);
+      const res = await api.subscribeFeed(target);
+      setUrlInput("");
+      setSelectedFeedId(res.feed.id);
+      await loadData(res.feed.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to subscribe to feed");
+    } finally {
+      setSubscribing(false);
+    }
+  };
+
+  const handleRefresh = async (feedId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    try {
+      setRefreshingFeedId(feedId);
+      setError(null);
+      await api.refreshFeed(feedId);
+      await loadData(selectedFeedId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh feed");
+    } finally {
+      setRefreshingFeedId(null);
+    }
+  };
+
+  const handleDelete = async (feedId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!confirm("Remove this feed and its articles?")) return;
+    try {
+      setError(null);
+      await api.deleteFeed(feedId);
+      if (selectedFeedId === feedId) {
+        setSelectedFeedId(null);
+        await loadData(null);
+      } else {
+        await loadData(selectedFeedId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete feed");
+    }
+  };
+
+  const handleImportAndListen = async (item: FeedItem) => {
+    try {
+      setImportingItemId(item.id);
+      setError(null);
+      const doc = await api.importFeedItem(item.id);
+      onSaved(doc.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to import article");
+      setImportingItemId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Quick subscribe form */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void handleSubscribe();
+        }}
+        className="flex gap-2"
+      >
+        <input
+          value={urlInput}
+          onChange={(e) => setUrlInput(e.target.value)}
+          placeholder="Paste RSS, Atom, or Substack URL (e.g. https://.../feed)"
+          className={inputCls}
+          disabled={subscribing}
+        />
+        <button
+          type="submit"
+          disabled={subscribing || !urlInput.trim()}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+        >
+          {subscribing ? <Loader2 size={16} className="animate-spin" /> : <Rss size={16} />}
+          Subscribe
+        </button>
+      </form>
+
+      {/* Preset suggestions pill row */}
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="text-zinc-500 dark:text-zinc-400">Presets:</span>
+        {PRESET_FEEDS.map((preset) => {
+          const isSubscribed = feeds.some((f) => f.url === preset.url);
+          return (
+            <button
+              key={preset.name}
+              type="button"
+              onClick={() => {
+                const existing = feeds.find((f) => f.url === preset.url);
+                if (existing) {
+                  setSelectedFeedId(existing.id);
+                } else {
+                  void handleSubscribe(preset.url);
+                }
+              }}
+              disabled={subscribing}
+              className={`rounded-full border px-2.5 py-1 transition-colors ${
+                isSubscribed
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                  : "border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              }`}
+            >
+              {isSubscribed ? "✓ " : "+ "}
+              {preset.name}
+            </button>
+          );
+        })}
+      </div>
+
+      <ErrorBox message={error} />
+
+      {/* Subscribed feeds horizontal pills */}
+      {feeds.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+          <button
+            type="button"
+            onClick={() => setSelectedFeedId(null)}
+            className={`rounded-lg px-2.5 py-1.5 font-medium whitespace-nowrap transition-colors ${
+              selectedFeedId === null
+                ? "bg-emerald-600 text-white dark:bg-emerald-500 dark:text-zinc-950"
+                : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            }`}
+          >
+            All Feeds
+          </button>
+          {feeds.map((feed) => {
+            const isSelected = selectedFeedId === feed.id;
+            const isRefreshing = refreshingFeedId === feed.id;
+            return (
+              <div
+                key={feed.id}
+                onClick={() => setSelectedFeedId(feed.id)}
+                className={`group flex cursor-pointer items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-medium whitespace-nowrap transition-colors ${
+                  isSelected
+                    ? "bg-emerald-600 text-white dark:bg-emerald-500 dark:text-zinc-950"
+                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                }`}
+              >
+                <span>{feed.title}</span>
+                {feed.unreadCount !== undefined && feed.unreadCount > 0 && (
+                  <span
+                    className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+                      isSelected
+                        ? "bg-emerald-700 text-white dark:bg-emerald-600"
+                        : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                    }`}
+                  >
+                    {feed.unreadCount}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  title="Refresh feed"
+                  disabled={isRefreshing}
+                  onClick={(e) => void handleRefresh(feed.id, e)}
+                  className="rounded p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
+                >
+                  <RefreshCw size={12} className={isRefreshing ? "animate-spin" : ""} />
+                </button>
+                <button
+                  type="button"
+                  title="Delete feed"
+                  onClick={(e) => void handleDelete(feed.id, e)}
+                  className="rounded p-0.5 hover:bg-black/10 dark:hover:bg-white/10"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Feed items list */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+          <span>
+            {loading
+              ? "Loading articles…"
+              : items.length === 0
+              ? "No feed items found"
+              : `Showing ${items.length} article${items.length === 1 ? "" : "s"}`}
+          </span>
+          {selectedFeedId && (
+            <button
+              type="button"
+              onClick={() => void handleRefresh(selectedFeedId)}
+              disabled={refreshingFeedId === selectedFeedId}
+              className="flex items-center gap-1 hover:text-zinc-700 dark:hover:text-zinc-200"
+            >
+              <RefreshCw
+                size={12}
+                className={refreshingFeedId === selectedFeedId ? "animate-spin" : ""}
+              />
+              Refresh Feed
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="flex h-40 items-center justify-center">
+            <Loader2 className="animate-spin text-zinc-400" size={24} />
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-zinc-200 p-8 text-center text-sm text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+            <Rss size={32} className="mb-2 text-zinc-400 opacity-60" />
+            <p className="font-medium">No feeds subscribed yet</p>
+            <p className="mt-1 text-xs">
+              Subscribe to an RSS or newsletter feed above or click one of the presets to get started!
+            </p>
+          </div>
+        ) : (
+          <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+            {items.map((item) => {
+              const isImporting = importingItemId === item.id;
+              const dateStr = item.publishedAt
+                ? new Date(item.publishedAt).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })
+                : "";
+              return (
+                <div
+                  key={item.id}
+                  className={`flex items-start justify-between gap-3 rounded-xl border p-3 transition-colors ${
+                    item.isRead
+                      ? "border-zinc-200/60 bg-zinc-50/50 opacity-80 dark:border-zinc-800/60 dark:bg-zinc-900/40"
+                      : "border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-900"
+                  }`}
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                      {item.feedTitle && (
+                        <span className="rounded bg-zinc-100 px-1.5 py-0.5 font-medium text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300">
+                          {item.feedTitle}
+                        </span>
+                      )}
+                      {dateStr && <span>{dateStr}</span>}
+                      {item.author && <span>· by {item.author}</span>}
+                    </div>
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group flex items-center gap-1 text-sm font-medium text-zinc-900 hover:text-emerald-600 dark:text-zinc-100 dark:hover:text-emerald-400"
+                    >
+                      <span className="line-clamp-2">{item.title}</span>
+                      <ExternalLink size={12} className="shrink-0 opacity-0 group-hover:opacity-100" />
+                    </a>
+                    {item.summary && (
+                      <p className="line-clamp-2 text-xs text-zinc-500 dark:text-zinc-400">
+                        {item.summary}
+                      </p>
+                    )}
+                  </div>
+                  <div className="shrink-0 pt-1">
+                    <button
+                      type="button"
+                      disabled={isImporting}
+                      onClick={() => void handleImportAndListen(item)}
+                      className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+                    >
+                      {isImporting ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Headphones size={13} />
+                      )}
+                      <span>🎧 Import & Listen</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ImportModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>("upload");
   const router = useRouter();
@@ -1606,6 +1939,7 @@ export function ImportModal({ onClose }: { onClose: () => void }) {
       {tab === "audio" && <AudioTab onSaved={onSaved} />}
       {tab === "upload" && <UploadTab onSaved={onSaved} />}
       {tab === "scan" && <ScanTab onSaved={onSaved} />}
+      {tab === "rss" && <RssTab onSaved={onSaved} />}
       {tab === "gdocs" && <UrlTab kind="gdocs" onSaved={onSaved} />}
       {tab === "article" && <UrlTab kind="article" onSaved={onSaved} />}
       {tab === "paste" && <PasteTab onSaved={onSaved} />}

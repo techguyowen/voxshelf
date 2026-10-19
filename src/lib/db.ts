@@ -201,6 +201,31 @@ CREATE INDEX IF NOT EXISTS idx_bookmarks_doc ON bookmarks(doc_id);
 CREATE INDEX IF NOT EXISTS idx_highlights_doc ON highlights(doc_id);
 CREATE INDEX IF NOT EXISTS idx_podcasts_doc ON podcasts(doc_id);
 CREATE INDEX IF NOT EXISTS idx_documents_updated ON documents(updated_at);
+CREATE TABLE IF NOT EXISTS feeds (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL UNIQUE,
+  site_url TEXT,
+  description TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS feed_items (
+  id TEXT PRIMARY KEY,
+  feed_id TEXT NOT NULL,
+  guid TEXT,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  author TEXT,
+  summary TEXT,
+  published_at TEXT,
+  is_read INTEGER NOT NULL DEFAULT 0,
+  doc_id TEXT,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_feed_items_feed ON feed_items(feed_id);
+CREATE INDEX IF NOT EXISTS idx_feed_items_published ON feed_items(published_at);
 CREATE TABLE IF NOT EXISTS _sync_tombstones (
   table_name TEXT NOT NULL,
   row_id TEXT NOT NULL,
@@ -362,6 +387,39 @@ const MIGRATIONS: Migration[] = [
           );
         }
       }
+    },
+  },
+  {
+    version: 7,
+    name: "add_feeds_and_feed_items_tables",
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS feeds (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          url TEXT NOT NULL UNIQUE,
+          site_url TEXT,
+          description TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS feed_items (
+          id TEXT PRIMARY KEY,
+          feed_id TEXT NOT NULL,
+          guid TEXT,
+          title TEXT NOT NULL,
+          url TEXT NOT NULL,
+          author TEXT,
+          summary TEXT,
+          published_at TEXT,
+          is_read INTEGER NOT NULL DEFAULT 0,
+          doc_id TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (feed_id) REFERENCES feeds(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_feed_items_feed ON feed_items(feed_id);
+        CREATE INDEX IF NOT EXISTS idx_feed_items_published ON feed_items(published_at);
+      `);
     },
   },
 ];

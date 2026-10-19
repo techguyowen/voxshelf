@@ -9,6 +9,8 @@ import type {
   DocumentDetail,
   DocumentSummary,
   ExtractResult,
+  Feed,
+  FeedItem,
   Folder,
   Highlight,
   HighlightColor,
@@ -249,6 +251,25 @@ export const api = {
   createFolder: (name: string, color?: string | null) =>
     send<Folder>("/api/folders", "POST", { name, color }),
   deleteFolder: (id: string) => send<{ ok: boolean }>(`/api/folders/${id}`, "DELETE"),
+
+  listFeeds: (params?: { feedId?: string; unread?: boolean; limit?: number }) => {
+    const sp = new URLSearchParams();
+    if (params?.feedId) sp.set("feedId", params.feedId);
+    if (params?.unread) sp.set("unread", "1");
+    if (params?.limit) sp.set("limit", String(params.limit));
+    const qs = sp.toString();
+    return get<{ feeds: Feed[]; items: FeedItem[] }>(`/api/feeds${qs ? `?${qs}` : ""}`);
+  },
+  subscribeFeed: (url: string) =>
+    send<{ feed: Feed; items: FeedItem[] }>("/api/feeds", "POST", { action: "subscribe", url }),
+  refreshFeed: (feedId: string) =>
+    send<{ ok: boolean; added: number }>("/api/feeds", "POST", { action: "refresh", feedId }),
+  importFeedItem: (itemId: string) =>
+    send<DocumentSummary>("/api/feeds", "POST", { action: "import", itemId }),
+  deleteFeed: (feedId: string) =>
+    send<{ ok: boolean }>("/api/feeds", "POST", { action: "delete", feedId }),
+  markFeedItemRead: (itemId: string, isRead = true) =>
+    send<{ ok: boolean }>("/api/feeds", "POST", { action: "mark-read", itemId, isRead }),
 
   voices: () => get<{ voices: VoiceInfo[]; default: string }>("/api/voices"),
   models: (key?: string) =>

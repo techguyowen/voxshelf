@@ -436,3 +436,29 @@ export interface AuthStatus {
   locked: boolean;
   authed: boolean;
 }
+
+export interface Feed {
+  id: string;
+  title: string;
+  url: string;
+  siteUrl?: string | null;
+  description?: string | null;
+  unreadCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedItem {
+  id: string;
+  feedId: string;
+  feedTitle?: string;
+  guid?: string | null;
+  title: string;
+  url: string;
+  author?: string | null;
+  summary?: string | null;
+  publishedAt?: string | null;
+  isRead: boolean;
+  docId?: string | null;
+  createdAt: string;
+}
