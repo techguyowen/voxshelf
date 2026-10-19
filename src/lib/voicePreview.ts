@@ -6,10 +6,17 @@
 
 import { api } from "./client";
 import { loadMuted, loadVolume } from "./volume";
+import {
+  WebSpeechPlayer,
+  deviceVoiceName,
+  isDeviceVoice,
+  isWebSpeechSupported,
+} from "./webSpeech";
 
 let previewAudio: HTMLAudioElement | null = null;
 /** Bumped on every play/stop so a stale fetch can't hijack the element. */
 let playToken = 0;
+let previewSpeech: WebSpeechPlayer | null = null;
 
 type EndListener = () => void;
 const endListeners = new Set<EndListener>();
@@ -46,16 +53,32 @@ export function subscribePreviewEnd(fn: EndListener): () => void {
 }
 
 export function isVoicePreviewPlaying(): boolean {
-  if (!previewAudio) return false;
+  if (previewAudio) {
+    try {
+      if (
+        !previewAudio.paused &&
+        !previewAudio.ended &&
+        previewAudio.src !== ""
+      ) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+  }
   try {
-    return !previewAudio.paused && !previewAudio.ended && previewAudio.src !== "";
+    return isWebSpeechSupported() && window.speechSynthesis.speaking;
   } catch {
     return false;
   }
 }
 
-/** Immediately silence any in-flight or playing voice preview. */
-export function stopVoicePreview(): void {
+/**
+ * Immediately silence a cloud (/api/tts) voice preview, if any — without
+ * touching speechSynthesis, so the device document engine (or a paused
+ * utterance awaiting resume) survives.
+ */
+export function stopCloudPreview(): void {
   playToken += 1;
   if (!previewAudio) return;
   try {
@@ -66,12 +89,63 @@ export function stopVoicePreview(): void {
   notifyEnded();
 }
 
+/** Immediately silence any in-flight or playing voice preview. */
+export function stopVoicePreview(): void {
+  stopCloudPreview();
+  try {
+    previewSpeech?.cancel();
+    if (isWebSpeechSupported()) window.speechSynthesis.cancel();
+  } catch {
+    // ignore
+  }
+  notifyEnded();
+}
+
+/**
+ * Speak a short audition sample for a `device:` voice directly in the
+ * browser (no network). Resolves once the utterance starts.
+ */
+export async function playDeviceVoicePreview(voice: string): Promise<void> {
+  const token = ++playToken;
+  if (!previewSpeech) previewSpeech = new WebSpeechPlayer();
+  const engine = previewSpeech;
+  const name = deviceVoiceName(voice) ?? voice;
+  await new Promise<void>((resolve, reject) => {
+    engine.speak(
+      { idx: 0, text: `Hi, I'm the ${name} voice on VoxShelf.` },
+      deviceVoiceName(voice),
+      1,
+      loadMuted() ? 0 : loadVolume(),
+      {
+        onEnd: () => {
+          if (token === playToken) notifyEnded();
+          resolve();
+        },
+        onError: (err) => {
+          if (token === playToken) notifyEnded();
+          const msg = err instanceof Error ? err.message : String(err ?? "");
+          // Superseded previews resolve silently like their cloud twin.
+          if (/interrupted|canceled|cancelled/i.test(msg)) resolve();
+          else reject(err instanceof Error ? err : new Error(msg));
+        },
+      },
+    );
+    // speak() is synchronous; the utterance is now queued or failed.
+    if (token === playToken) resolve();
+  });
+}
+
 /**
  * Fetch a short audition sample for `voice` from /api/tts and play it.
  * Resolves once playback starts; resolves silently when superseded by a
  * newer preview (or by stopVoicePreview) while the sample was loading.
  */
 export async function playVoicePreview(voice: string): Promise<void> {
+  if (isDeviceVoice(voice)) {
+    stopCloudPreview();
+    await playDeviceVoicePreview(voice);
+    return;
+  }
   const token = ++playToken;
   const audio = getPreviewAudio();
   if (!audio) throw new Error("Audio preview is unavailable in this browser.");

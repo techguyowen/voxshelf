@@ -34,6 +34,13 @@ import {
   formatTimeLeftBadge,
   wordsRemainingFrom,
 } from "@/lib/readingTime";
+import {
+  deviceVoiceName,
+  getWebSpeechVoices,
+  isDeviceVoice,
+  isWebSpeechSupported,
+  toDeviceVoiceValue,
+} from "@/lib/webSpeech";
 import type { DocumentDetail, VoiceInfo } from "@/lib/types";
 import type { Player } from "@/hooks/usePlayer";
 
@@ -206,6 +213,8 @@ export function PlayerBar({
   onOpenAI: () => void;
 }) {
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
+  const [deviceVoices, setDeviceVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [deviceSupported] = useState(() => isWebSpeechSupported());
   const [expanded, setExpanded] = useState(false);
   const [styleDraft, setStyleDraft] = useState(player.stylePrompt);
 
@@ -215,6 +224,19 @@ export function PlayerBar({
       .then((v) => setVoices(v.voices))
       .catch(() => setVoices([]));
   }, []);
+
+  useEffect(() => {
+    if (!deviceSupported) return;
+    let live = true;
+    getWebSpeechVoices()
+      .then((list) => {
+        if (live) setDeviceVoices(list);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [deviceSupported]);
 
   useEffect(() => {
     setStyleDraft(player.stylePrompt);
@@ -242,8 +264,15 @@ export function PlayerBar({
   const iconBtn =
     "flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full p-2.5 text-zinc-700 hover:bg-zinc-200/70 dark:text-zinc-200 dark:hover:bg-zinc-800";
 
-  const currentTone =
-    voices.find((v) => v.name === player.voice)?.description ?? "";
+  const currentTone = isDeviceVoice(player.voice)
+    ? (deviceVoices.find((v) => toDeviceVoiceValue(v.name) === player.voice)
+        ?.lang ?? "On-device")
+    : (voices.find((v) => v.name === player.voice)?.description ?? "");
+  // Keep the select controlled when the current voice isn't listed yet
+  // (cloud list still loading, or a device voice from another machine).
+  const currentValueListed =
+    voices.some((v) => v.name === player.voice) ||
+    deviceVoices.some((v) => toDeviceVoiceValue(v.name) === player.voice);
 
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-white/95 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95">
@@ -407,13 +436,22 @@ export function PlayerBar({
             aria-label="Playback speed"
           />
           <div className="flex shrink-0 items-center gap-1.5">
-            {currentTone && (
+            {player.isDeviceEngine ? (
               <span
-                className="hidden rounded-full bg-zinc-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 sm:inline"
-                title={`Voice tone: ${currentTone}`}
+                className="hidden rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 sm:inline"
+                title="Synthesized on this device — free, private, works offline"
               >
-                {currentTone}
+                📱 On-device
               </span>
+            ) : (
+              currentTone && (
+                <span
+                  className="hidden rounded-full bg-zinc-200 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 sm:inline"
+                  title={`Voice tone: ${currentTone}`}
+                >
+                  {currentTone}
+                </span>
+              )
             )}
             <select
               value={player.voice}
@@ -422,12 +460,38 @@ export function PlayerBar({
               aria-label="Voice"
               title={currentTone ? `Narration voice — ${currentTone}` : "Narration voice"}
             >
-              {voices.length === 0 && <option>{player.voice}</option>}
-              {voices.map((v) => (
-                <option key={v.name} value={v.name}>
-                  {v.name} · {v.description}
+              {!currentValueListed && (
+                <option value={player.voice}>
+                  {deviceVoiceName(player.voice) ?? player.voice}
                 </option>
-              ))}
+              )}
+              <optgroup label="Gemini Cloud Voices">
+                {voices.length === 0 && !isDeviceVoice(player.voice) && (
+                  <option value={player.voice}>{player.voice}</option>
+                )}
+                {voices.map((v) => (
+                  <option key={v.name} value={v.name}>
+                    {v.name} · {v.description}
+                  </option>
+                ))}
+              </optgroup>
+              {deviceSupported && (
+                <optgroup label="Device / Offline Voices">
+                  {deviceVoices.map((v) => (
+                    <option
+                      key={`${v.name}::${v.lang}`}
+                      value={toDeviceVoiceValue(v.name)}
+                    >
+                      {v.name} · {v.lang}
+                    </option>
+                  ))}
+                  {deviceVoices.length === 0 && (
+                    <option disabled value="device:__loading__">
+                      Loading device voices…
+                    </option>
+                  )}
+                </optgroup>
+              )}
             </select>
             <VoicePreviewButton voice={player.voice} />
           </div>
@@ -471,8 +535,18 @@ export function PlayerBar({
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              placeholder="Style prompt (e.g. “warm bedtime-story voice”) — applies to new sentences"
-              className="min-h-[44px] w-full rounded-lg border border-zinc-300 px-3 py-2 text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-700 dark:bg-zinc-900"
+              disabled={player.isDeviceEngine}
+              title={
+                player.isDeviceEngine
+                  ? "Style prompts apply to Gemini cloud voices only"
+                  : undefined
+              }
+              placeholder={
+                player.isDeviceEngine
+                  ? "Style prompts don't apply to on-device voices"
+                  : "Style prompt (e.g. “warm bedtime-story voice”) — applies to new sentences"
+              }
+              className="min-h-[44px] w-full rounded-lg border border-zinc-300 px-3 py-2 text-xs outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
               aria-label="Narration style prompt"
             />
             <div
@@ -543,13 +617,15 @@ export function PlayerBar({
                   Cancel
                 </button>
               )}
-              <a
-                href={`/api/documents/${doc.id}/audio?download=1&voice=${encodeURIComponent(player.voice)}&style=${encodeURIComponent(player.stylePrompt)}`}
-                className="flex min-h-[44px] items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                title="Download the whole document as one WAV file"
-              >
-                <Download size={13} /> Audio
-              </a>
+              {!player.isDeviceEngine && (
+                <a
+                  href={`/api/documents/${doc.id}/audio?download=1&voice=${encodeURIComponent(player.voice)}&style=${encodeURIComponent(player.stylePrompt)}`}
+                  className="flex min-h-[44px] items-center gap-1 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                  title="Download the whole document as one WAV file"
+                >
+                  <Download size={13} /> Audio
+                </a>
+              )}
               <button
                 onClick={onOpenAI}
                 className="ml-auto flex min-h-[44px] items-center gap-1 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"

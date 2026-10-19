@@ -13,7 +13,7 @@ import {
 } from "./pronunciation";
 import { getDefaultVoice } from "./settings";
 import { chunkForTts } from "./text";
-import { isValidVoice } from "./voices";
+import { DEFAULT_VOICE, isDeviceVoiceValue, isValidVoice } from "./voices";
 
 export interface TtsResult {
   hash: string;
@@ -48,7 +48,11 @@ export async function synthesizeAndCache(
       `Text is too long for one request (max ${MAX_CHARS.toLocaleString()} characters).`,
     );
   }
-  const v = voice && isValidVoice(voice) ? voice : getDefaultVoice();
+  // On-device voices are spoken in the browser; if one ever reaches the
+  // cloud synthesizer (document/default voice), fall back to the default
+  // Gemini voice instead of sending an invalid voice name to the API.
+  let v = voice && isValidVoice(voice) ? voice : getDefaultVoice();
+  if (isDeviceVoiceValue(v)) v = DEFAULT_VOICE;
   const style = stylePrompt?.trim() || "";
   const hash = audioKey(clean, v, style);
 

@@ -217,6 +217,14 @@ export function clearNowPlaying(): void {
       // ignore
     }
   }
+  // The on-device engine speaks outside the audio element; silence it too.
+  try {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+  } catch {
+    // ignore
+  }
   engine = null;
   engineDocId = null;
   current = null;

@@ -41,8 +41,22 @@ export const VOICE_NAMES: string[] = GEMINI_VOICES.map((v) => v.name);
 
 export const DEFAULT_VOICE = "Kore";
 
+/**
+ * Stored-voice prefix for on-device Web Speech API voices
+ * (`device:<VoiceName>`). These are synthesized in the browser and must
+ * never be sent to Gemini (see the tts.ts guard).
+ */
+export const DEVICE_VOICE_PREFIX = "device:";
+
+export function isDeviceVoiceValue(voice: string): boolean {
+  return (
+    voice.startsWith(DEVICE_VOICE_PREFIX) &&
+    voice.length > DEVICE_VOICE_PREFIX.length
+  );
+}
+
 export function isValidVoice(voice: string): boolean {
-  return VOICE_NAMES.includes(voice);
+  return VOICE_NAMES.includes(voice) || isDeviceVoiceValue(voice);
 }
 
 export function voiceDescription(name: string): string {

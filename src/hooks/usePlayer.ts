@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadAppearance } from "@/components/AppearanceMenu";
-import { api } from "@/lib/client";
+import { ApiError, api } from "@/lib/client";
 import {
   applySleepFadedVolume,
   getEngine,
@@ -13,8 +13,16 @@ import {
 } from "@/lib/globalPlayer";
 import { offlineAudioUrl } from "@/lib/offlineStore";
 import type { DocumentDetail } from "@/lib/types";
-import { stopVoicePreview } from "@/lib/voicePreview";
-import { applyStoredVolume } from "@/lib/volume";
+import { stopCloudPreview, stopVoicePreview } from "@/lib/voicePreview";
+import { applyStoredVolume, loadMuted, loadVolume } from "@/lib/volume";
+import {
+  WebSpeechPlayer,
+  charIndexToWordIndex,
+  deviceVoiceName,
+  getDefaultDeviceVoice,
+  isDeviceVoice,
+  isWebSpeechSupported,
+} from "@/lib/webSpeech";
 
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "error";
 
@@ -26,6 +34,8 @@ export interface UsePlayerOpts {
   onProgress?: (sentenceIdx: number, charOffset: number) => void;
   /** Auto-skip filter: cleans speakable text and flags whole-sentence skips. */
   filterSentence?: SentenceFilter;
+  /** Fired when playback auto-falls-back to on-device speech (no API key). */
+  onDeviceFallback?: () => void;
 }
 
 interface Clip {
@@ -101,6 +111,23 @@ function getSentenceWordTimings(text: string): WordTiming[] {
   return timings;
 }
 
+/**
+ * True when a cloud TTS failure should trigger the on-device fallback:
+ * a missing/invalid Gemini API key, or a server that can't be reached at
+ * all (the device engine keeps working offline).
+ */
+function isDeviceFallbackError(e: unknown): boolean {
+  if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+    return true;
+  }
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  if (/api\s?key|not configured/i.test(msg)) return true;
+  return (
+    e instanceof TypeError &&
+    /fetch|network|offline|load failed|failed to fetch/i.test(msg)
+  );
+}
+
 export function computeActiveWordIndex(
   text: string,
   currentTime: number,
@@ -160,6 +187,10 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const styleRef = useRef(stylePrompt);
   const onProgressRef = useRef(opts.onProgress);
   const filterRef = useRef(opts.filterSentence);
+  const onDeviceFallbackRef = useRef(opts.onDeviceFallback);
+  const speechRef = useRef<WebSpeechPlayer | null>(null);
+  const advanceRef = useRef<() => void>(() => {});
+  const deviceEstimateRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const sleepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -173,6 +204,14 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     }
   }, []);
 
+  /** Stop the device-engine karaoke estimator (see speakDevice). */
+  const clearDeviceEstimate = useCallback(() => {
+    if (deviceEstimateRef.current) {
+      clearInterval(deviceEstimateRef.current);
+      deviceEstimateRef.current = null;
+    }
+  }, []);
+
   docRef.current = doc;
   statusRef.current = status;
   currentIdxRef.current = currentIdx;
@@ -181,6 +220,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   styleRef.current = stylePrompt;
   onProgressRef.current = opts.onProgress;
   filterRef.current = opts.filterSentence;
+  onDeviceFallbackRef.current = opts.onDeviceFallback;
 
   /** Speakable text for a sentence after the auto-skip filter. */
   const speakText = useCallback((idx: number): string => {
@@ -333,6 +373,96 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     [ensureAudio],
   );
 
+  /**
+   * Speak one sentence through the on-device engine: no /api/tts call, no
+   * cache — audio is synthesized directly in the browser. Word-boundary
+   * events drive the same karaoke state (currentWord/clipProgress) as the
+   * cloud engine, so highlighting, the timeline, and the mini-player behave
+   * identically.
+   */
+  const speakDevice = useCallback(
+    (idx: number, op: number) => {
+      const d = docRef.current;
+      if (!d || idx < 0 || idx >= d.sentences.length) return;
+      // A voice-audition preview must never overlap document audio.
+      stopCloudPreview();
+      const audio = audioRef.current;
+      if (audio) {
+        try {
+          audio.pause();
+        } catch {
+          // ignore
+        }
+      }
+      if (!speechRef.current) speechRef.current = new WebSpeechPlayer();
+      const engine = speechRef.current;
+      const text = speakText(idx);
+      setCurrentIdx(idx);
+      setClipProgress(0);
+      setCurrentWord(-1);
+      setLoadingIdx(null);
+      setError(null);
+      setStatus("playing");
+      reportProgress(idx);
+      // Boundary-event fallback: browsers without word-boundary events
+      // (older Safari) still get moving karaoke from a time-based estimate
+      // until the first real boundary event arrives.
+      clearDeviceEstimate();
+      let boundarySeen = false;
+      const startedAt = Date.now();
+      const rate = Math.min(2.5, Math.max(0.5, speedRef.current));
+      deviceEstimateRef.current = setInterval(() => {
+        if (boundarySeen || op !== opRef.current) {
+          clearDeviceEstimate();
+          return;
+        }
+        const elapsedSec = (Date.now() - startedAt) / 1000;
+        const estChar = Math.floor(elapsedSec * rate * 14);
+        setCurrentWord(charIndexToWordIndex(text, estChar));
+        setClipProgress(
+          text.length > 0
+            ? Math.min(0.99, Math.max(0, estChar / text.length))
+            : 0,
+        );
+      }, 250);
+      engine.speak(
+        { idx, text },
+        deviceVoiceName(voiceRef.current),
+        speedRef.current,
+        loadMuted() ? 0 : loadVolume(),
+        {
+          onWord: (charIndex) => {
+            if (op !== opRef.current) return;
+            boundarySeen = true;
+            setCurrentWord(charIndexToWordIndex(text, charIndex));
+            setClipProgress(
+              text.length > 0
+                ? Math.min(1, Math.max(0, charIndex / text.length))
+                : 0,
+            );
+          },
+          onEnd: () => {
+            if (op !== opRef.current) return;
+            clearDeviceEstimate();
+            setClipProgress(1);
+            advanceRef.current();
+          },
+          onError: (err) => {
+            if (op !== opRef.current) return;
+            clearDeviceEstimate();
+            const msg = err instanceof Error ? err.message : String(err ?? "");
+            // Cancel-driven errors (interrupted/canceled) mean a newer
+            // utterance superseded this one; stay silent.
+            if (/interrupted|canceled|cancelled/i.test(msg)) return;
+            setStatus("error");
+            setError(msg || "On-device speech failed.");
+          },
+        },
+      );
+    },
+    [speakText, reportProgress, clearDeviceEstimate],
+  );
+
   const goTo = useCallback(
     async (idx: number, autoplay: boolean) => {
       const d = docRef.current;
@@ -346,6 +476,32 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         idx < currentIdxRef.current ? -1 : 1,
       );
       const op = ++opRef.current;
+      // On-device engine: synthesize in the browser, never touching /api/tts.
+      if (isDeviceVoice(voiceRef.current)) {
+        if (!isWebSpeechSupported()) {
+          setLoadingIdx(null);
+          setStatus("error");
+          setError("On-device speech is not supported in this browser.");
+          return;
+        }
+        if (!autoplay) {
+          speechRef.current?.cancel();
+          clearDeviceEstimate();
+          setError(null);
+          setLoadingIdx(null);
+          setCurrentIdx(clamped);
+          setClipProgress(0);
+          setCurrentWord(-1);
+          setStatus("paused");
+          reportProgress(clamped);
+          return;
+        }
+        speakDevice(clamped, op);
+        return;
+      }
+      // Cloud engine: make sure no device utterance keeps speaking.
+      speechRef.current?.cancel();
+      clearDeviceEstimate();
       setError(null);
       setLoadingIdx(clamped);
       if (autoplay) setStatus("loading");
@@ -383,24 +539,71 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         void ensureAudio(clamped + 3).catch(() => {});
       } catch (e) {
         if (op !== opRef.current) return;
+        // Zero-key / offline fallback: when the cloud request fails for
+        // lack of an API key (or the server is unreachable) and the
+        // browser can speak, switch to the on-device engine and retry the
+        // same sentence instead of surfacing an error.
+        if (
+          !isDeviceVoice(voiceRef.current) &&
+          isWebSpeechSupported() &&
+          isDeviceFallbackError(e)
+        ) {
+          const fallback = await getDefaultDeviceVoice().catch(() => null);
+          if (fallback && op === opRef.current) {
+            voiceRef.current = fallback;
+            setVoiceState(fallback);
+            setLoadingIdx(null);
+            onDeviceFallbackRef.current?.();
+            void goTo(clamped, autoplay);
+            return;
+          }
+        }
         setLoadingIdx(null);
         setStatus("error");
         setError(e instanceof Error ? e.message : "Playback failed.");
       }
     },
-    [ensureAudio, reportProgress, resolveReadable, clearPendingPause],
+    [
+      ensureAudio,
+      reportProgress,
+      resolveReadable,
+      clearPendingPause,
+      speakDevice,
+      clearDeviceEstimate,
+    ],
   );
 
   const pause = useCallback(() => {
     opRef.current += 1;
     clearPendingPause();
+    clearDeviceEstimate();
+    if (isDeviceVoice(voiceRef.current)) {
+      speechRef.current?.pause();
+      setStatus((s) => (s === "playing" || s === "loading" ? "paused" : s));
+      reportProgress(currentIdxRef.current);
+      return;
+    }
     const audio = audioRef.current;
     if (audio) audio.pause();
     setStatus((s) => (s === "playing" || s === "loading" ? "paused" : s));
     reportProgress(currentIdxRef.current);
-  }, [reportProgress, clearPendingPause]);
+  }, [reportProgress, clearPendingPause, clearDeviceEstimate]);
 
   const play = useCallback(() => {
+    if (isDeviceVoice(voiceRef.current)) {
+      // Cloud-audition preview off, but leave any paused utterance alone
+      // so resume() below can continue it.
+      stopCloudPreview();
+      const engine = speechRef.current;
+      if (statusRef.current === "paused" && engine && engine.paused()) {
+        setError(null);
+        engine.resume();
+        setStatus("playing");
+        return;
+      }
+      void goTo(currentIdxRef.current, true);
+      return;
+    }
     stopVoicePreview();
     const audio = audioRef.current;
     if (
@@ -462,6 +665,14 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       const audio = audioRef.current;
       if (!d || !audio) return;
       clearPendingPause();
+      // Device engine: utterances can't be scrubbed, so second-skips step
+      // sentence-granular instead (forward/back one sentence).
+      if (isDeviceVoice(voiceRef.current)) {
+        const wasPlaying =
+          statusRef.current === "playing" || statusRef.current === "loading";
+        void goTo(currentIdxRef.current + (seconds >= 0 ? 1 : -1), wasPlaying);
+        return;
+      }
       const op = ++opRef.current;
       const wasPlaying = statusRef.current === "playing";
       try {
@@ -530,11 +741,41 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     const c = clampSpeed(v);
     setSpeedState(c);
     if (audioRef.current) audioRef.current.playbackRate = c;
+    // Device engine: the rate is fixed per utterance, so a change applies
+    // from the next sentence (the engine clamps to its 0.5–2.5 range).
   }, []);
 
-  const setVoice = useCallback((v: string) => {
-    setVoiceState(v);
-  }, []);
+  const setVoice = useCallback(
+    (v: string) => {
+      if (v === voiceRef.current) return;
+      const wasDevice = isDeviceVoice(voiceRef.current);
+      const willDevice = isDeviceVoice(v);
+      voiceRef.current = v;
+      setVoiceState(v);
+      // Switching engines restarts the current sentence so the new voice
+      // is heard immediately and the two engines never overlap. Same-engine
+      // voice changes apply from the next sentence.
+      if (wasDevice !== willDevice) {
+        if (
+          statusRef.current === "playing" ||
+          statusRef.current === "loading"
+        ) {
+          void goTo(currentIdxRef.current, true);
+        } else {
+          speechRef.current?.cancel();
+          const audio = audioRef.current;
+          if (audio) {
+            try {
+              audio.pause();
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    },
+    [goTo],
+  );
 
   const setStylePrompt = useCallback((v: string) => {
     setStylePromptState(v);
@@ -595,6 +836,9 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
    * while hidden, so the karaoke cursor would otherwise lag behind the audio.
    */
   const resync = useCallback(() => {
+    // Device engine karaoke is driven by boundary events, not the audio
+    // element (which may hold a stale cloud clip); nothing to resync.
+    if (isDeviceVoice(voiceRef.current)) return;
     const audio = audioRef.current ?? getSharedAudio();
     if (!audio || !audio.src) return;
     const dur = audio.duration;
@@ -659,6 +903,10 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     }
   }, [goTo, reportProgress, clearSleep, clearPendingPause]);
 
+  // Device utterance completion delegates here (mutable ref avoids a
+  // speakDevice → advance → goTo → speakDevice hook cycle).
+  advanceRef.current = advance;
+
   // --- audio element lifecycle (shared element survives navigation) ---
   useEffect(() => {
     const audio = getSharedAudio();
@@ -719,8 +967,10 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       clearPendingPause();
+      clearDeviceEstimate();
       // The shared element keeps playing in the background on unmount so
       // navigation never interrupts listening; only detach our listeners.
+      // (Device speech likewise continues; the engine stays registered.)
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("play", onPlay);
       audio.removeEventListener("pause", onPause);
@@ -756,6 +1006,8 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       setClipProgress(bgMeta?.clipProgress ?? 0);
       setCurrentWord(-1);
     } else {
+      speechRef.current?.cancel();
+      clearDeviceEstimate();
       if (audio) {
         audio.pause();
         audio.removeAttribute("src");
@@ -858,6 +1110,8 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     loadingIdx,
     speed,
     voice,
+    /** True when the on-device engine is active (no /api/tts calls). */
+    isDeviceEngine: isDeviceVoice(voice),
     stylePrompt,
     clipProgress,
     currentWord,
