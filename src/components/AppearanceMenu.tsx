@@ -1,7 +1,16 @@
 "use client";
 
 import { BookOpenText, Check, Eclipse, Laptop, Moon, Sparkles, Sun } from "lucide-react";
-import type { ReaderPageWidth } from "@/lib/types";
+import {
+  DEFAULT_PARAGRAPH_PAUSE_MS,
+  DEFAULT_SENTENCE_PAUSE_MS,
+  MAX_PARAGRAPH_PAUSE_MS,
+  MAX_SENTENCE_PAUSE_MS,
+  clampParagraphPauseMs,
+  clampSentencePauseMs,
+  type PlaybackPacingSettings,
+  type ReaderPageWidth,
+} from "@/lib/types";
 import { useTheme, type ThemeMode } from "./ThemeContext";
 
 export type CursorColor = "yellow" | "blue" | "green" | "purple" | "pink" | "orange" | "carolina";
@@ -14,12 +23,14 @@ export type AppearanceFont =
   | "opendyslexic"
   | "jetbrains";
 
-export interface AppearancePrefs {
+export interface AppearancePrefs extends PlaybackPacingSettings {
   cursorColor: CursorColor;
   highlightSentence: boolean;
   font: AppearanceFont;
   autoPlay: boolean;
   clickToListen: boolean;
+  sentencePauseMs: number;
+  paragraphPauseMs: number;
 }
 
 export const DEFAULT_APPEARANCE: AppearancePrefs = {
@@ -28,7 +39,12 @@ export const DEFAULT_APPEARANCE: AppearancePrefs = {
   font: "atkinson",
   autoPlay: false,
   clickToListen: true,
+  sentencePauseMs: DEFAULT_SENTENCE_PAUSE_MS,
+  paragraphPauseMs: DEFAULT_PARAGRAPH_PAUSE_MS,
 };
+
+export const SENTENCE_PAUSE_PRESETS = [0, 150, 300, 500] as const;
+export const PARAGRAPH_PAUSE_PRESETS = [0, 250, 500, 1000] as const;
 
 const APPEARANCE_KEY = "vs-appearance";
 const LEGACY_APPEARANCE_KEY = "vf-appearance";
@@ -37,11 +53,14 @@ export function loadAppearance(): AppearancePrefs {
   try {
     const raw =
       localStorage.getItem(APPEARANCE_KEY) ?? localStorage.getItem(LEGACY_APPEARANCE_KEY);
-    if (!raw) return DEFAULT_APPEARANCE;
+    if (!raw) return { ...DEFAULT_APPEARANCE };
     const parsed = JSON.parse(raw) as Partial<AppearancePrefs>;
-    return { ...DEFAULT_APPEARANCE, ...parsed };
+    const merged = { ...DEFAULT_APPEARANCE, ...parsed };
+    merged.sentencePauseMs = clampSentencePauseMs(merged.sentencePauseMs);
+    merged.paragraphPauseMs = clampParagraphPauseMs(merged.paragraphPauseMs);
+    return merged;
   } catch {
-    return DEFAULT_APPEARANCE;
+    return { ...DEFAULT_APPEARANCE };
   }
 }
 
@@ -333,6 +352,93 @@ export function AppearanceMenu({
           </span>
           <Toggle on={focusMask} onChange={onFocusMask} label="Focus mask" />
         </div>
+      </div>
+
+      <div className="sm:col-span-2">
+        <p className="mb-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+          Pacing &amp; Pauses
+        </p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
+              Sentence pause: {prefs.sentencePauseMs}ms
+            </span>
+            <div
+              className="grid grid-cols-4 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800"
+              role="group"
+              aria-label="Sentence pause presets"
+            >
+              {SENTENCE_PAUSE_PRESETS.map((ms) => {
+                const active = prefs.sentencePauseMs === ms;
+                return (
+                  <button
+                    key={ms}
+                    onClick={() => set({ sentencePauseMs: ms })}
+                    aria-pressed={active}
+                    className={`rounded-md px-2 py-1.5 text-xs font-medium tabular-nums ${
+                      active
+                        ? "bg-white shadow text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                    }`}
+                  >
+                    {ms}ms
+                  </button>
+                );
+              })}
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={MAX_SENTENCE_PAUSE_MS}
+              step={50}
+              value={prefs.sentencePauseMs}
+              onChange={(e) => set({ sentencePauseMs: clampSentencePauseMs(Number(e.target.value)) })}
+              className="mt-1 w-full"
+              aria-label="Sentence pause in milliseconds"
+            />
+          </div>
+          <div>
+            <span className="mb-1 block text-xs text-zinc-500 dark:text-zinc-400">
+              Paragraph pause: {prefs.paragraphPauseMs}ms
+            </span>
+            <div
+              className="grid grid-cols-4 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800"
+              role="group"
+              aria-label="Paragraph pause presets"
+            >
+              {PARAGRAPH_PAUSE_PRESETS.map((ms) => {
+                const active = prefs.paragraphPauseMs === ms;
+                return (
+                  <button
+                    key={ms}
+                    onClick={() => set({ paragraphPauseMs: ms })}
+                    aria-pressed={active}
+                    className={`rounded-md px-2 py-1.5 text-xs font-medium tabular-nums ${
+                      active
+                        ? "bg-white shadow text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
+                    }`}
+                  >
+                    {ms}ms
+                  </button>
+                );
+              })}
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={MAX_PARAGRAPH_PAUSE_MS}
+              step={50}
+              value={prefs.paragraphPauseMs}
+              onChange={(e) => set({ paragraphPauseMs: clampParagraphPauseMs(Number(e.target.value)) })}
+              className="mt-1 w-full"
+              aria-label="Paragraph pause in milliseconds"
+            />
+          </div>
+        </div>
+        <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500">
+          Brief silence between sentences; seeking or skipping bypasses a pending pause.
+        </p>
       </div>
 
       {onOpenPronunciations && (

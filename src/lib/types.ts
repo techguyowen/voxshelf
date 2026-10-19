@@ -290,6 +290,42 @@ export type PrerenderEvent =
   | PrerenderErrorEvent
   | PrerenderCompleteEvent;
 
+/** Playback pacing: breath pauses inserted between spoken sentences. */
+export interface PlaybackPacingSettings {
+  /** Silence between sentences inside one paragraph (0-1000ms). Default 0. */
+  sentencePauseMs?: number;
+  /** Silence when the next sentence starts a new paragraph (0-2000ms). Default 200. */
+  paragraphPauseMs?: number;
+}
+
+export const DEFAULT_SENTENCE_PAUSE_MS = 0;
+export const DEFAULT_PARAGRAPH_PAUSE_MS = 200;
+export const MAX_SENTENCE_PAUSE_MS = 1000;
+export const MAX_PARAGRAPH_PAUSE_MS = 2000;
+
+export function clampSentencePauseMs(v: number): number {
+  if (!Number.isFinite(v)) return DEFAULT_SENTENCE_PAUSE_MS;
+  return Math.min(MAX_SENTENCE_PAUSE_MS, Math.max(0, Math.round(v)));
+}
+
+export function clampParagraphPauseMs(v: number): number {
+  if (!Number.isFinite(v)) return DEFAULT_PARAGRAPH_PAUSE_MS;
+  return Math.min(MAX_PARAGRAPH_PAUSE_MS, Math.max(0, Math.round(v)));
+}
+
+/**
+ * Paragraph-break heuristic from sentence char offsets: consecutive sentences
+ * within one paragraph are separated by a single space (a char gap of 1), so
+ * a larger gap implies newline(s) between them.
+ */
+export function startsNewParagraph(
+  prev: Sentence | undefined,
+  next: Sentence | undefined,
+): boolean {
+  if (!prev || !next) return false;
+  return next.charStart - prev.charEnd > 1;
+}
+
 export type ReaderFont = "sans" | "serif" | "mono" | "dyslexic";
 
 export type ReaderPageWidth = "narrow" | "comfortable" | "wide";

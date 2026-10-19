@@ -26,7 +26,13 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, downloadTextFile, safeFilename } from "@/lib/client";
+import {
+  api,
+  buildAnkiTsv,
+  buildObsidianHighlightsMarkdown,
+  downloadTextFile,
+  safeFilename,
+} from "@/lib/client";
 import { useToast } from "./Toast";
 import type {
   Bookmark,
@@ -564,6 +570,45 @@ export function AIDrawer({
     );
   }
 
+  function exportToObsidian() {
+    if (highlights.length === 0) return;
+    downloadTextFile(
+      safeFilename(`${doc.title}-obsidian`, "md"),
+      buildObsidianHighlightsMarkdown(doc, highlights),
+      "text/markdown",
+    );
+    toast.success("Exported to Obsidian (.md)!");
+  }
+
+  function exportQuizToAnki() {
+    if (!quiz || quiz.questions.length === 0) return;
+    const cards = quiz.questions.map((q) => {
+      const answer = q.options[q.answerIndex] ?? "";
+      return {
+        front: q.question,
+        back: q.explanation ? `${answer} — ${q.explanation}` : answer,
+      };
+    });
+    downloadTextFile(
+      safeFilename(`${doc.title}-anki`, "tsv"),
+      buildAnkiTsv(cards),
+      "text/tab-separated-values",
+    );
+    toast.success("Exported quiz to Anki (.tsv)!");
+  }
+
+  function exportCardsToAnki() {
+    if (!quiz || quiz.flashcards.length === 0) return;
+    downloadTextFile(
+      safeFilename(`${doc.title}-anki-cards`, "tsv"),
+      buildAnkiTsv(
+        quiz.flashcards.map((c) => ({ front: c.front, back: c.back })),
+      ),
+      "text/tab-separated-values",
+    );
+    toast.success("Exported flashcards to Anki (.tsv)!");
+  }
+
   async function downloadHighlightAudio(h: Highlight) {
     if (clipBusy) return;
     setClipBusy(h.id);
@@ -1008,20 +1053,29 @@ export function AIDrawer({
                 </div>
               ) : (
                 <>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold">
                       Score: {score}/{quiz.questions.length}
                       <span className="ml-2 font-normal text-zinc-500">
                         ({answered} answered)
                       </span>
                     </p>
-                    <button
-                      onClick={() => void generateQuiz()}
-                      disabled={quizBusy}
-                      className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
-                    >
-                      <RotateCcw size={13} /> New quiz
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={exportQuizToAnki}
+                        className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                        title="Download quiz questions as Anki-importable TSV"
+                      >
+                        <FileDown size={13} /> Export to Anki (.tsv)
+                      </button>
+                      <button
+                        onClick={() => void generateQuiz()}
+                        disabled={quizBusy}
+                        className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                      >
+                        <RotateCcw size={13} /> New quiz
+                      </button>
+                    </div>
                   </div>
                   {quiz.questions.map((q, qi) => {
                     const picked = answers[qi];
@@ -1103,6 +1157,18 @@ export function AIDrawer({
                 </p>
               ) : (
                 <>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold">
+                      {quiz.flashcards.length} cards
+                    </p>
+                    <button
+                      onClick={exportCardsToAnki}
+                      className="flex items-center gap-1 rounded-lg border border-zinc-300 px-2 py-1 text-xs font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                      title="Download flashcards as Anki-importable TSV"
+                    >
+                      <FileDown size={13} /> Export to Anki (.tsv)
+                    </button>
+                  </div>
                   <button
                     onClick={() => setCardFlipped((f) => !f)}
                     className="vf-flip block w-full text-center"
@@ -1284,6 +1350,13 @@ export function AIDrawer({
                     title="Export all highlights and notes as Markdown for Obsidian / Notion"
                   >
                     <FileDown size={14} /> Export to Markdown (.md)
+                  </button>
+                  <button
+                    onClick={exportToObsidian}
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white transition-colors sm:col-span-2"
+                    title="Download highlights with YAML frontmatter for Obsidian"
+                  >
+                    <Download size={14} /> Export to Obsidian
                   </button>
                 </div>
               )}

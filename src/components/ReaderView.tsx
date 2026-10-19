@@ -75,6 +75,7 @@ import { PrerenderModal } from "./PrerenderModal";
 import { PronunciationModal } from "./PronunciationModal";
 import {
   AppearanceMenu,
+  DEFAULT_APPEARANCE,
   appearanceFontClass,
   loadAppearance,
   pageWidthClass,
@@ -650,7 +651,7 @@ export function ReaderView({ docId }: { docId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<ReaderPrefs>(DEFAULT_PREFS);
   const [appearance, setAppearance] = useState<AppearancePrefs>(() =>
-    typeof window === "undefined" ? { cursorColor: "yellow", highlightSentence: true, font: "atkinson", autoPlay: false, clickToListen: true } : loadAppearance(),
+    typeof window === "undefined" ? { ...DEFAULT_APPEARANCE } : loadAppearance(),
   );
   const [autoSkip, setAutoSkip] = useState<AutoSkipOptions>(() =>
     typeof window === "undefined"

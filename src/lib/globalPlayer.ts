@@ -4,7 +4,75 @@
 // so a floating mini-player (and lock-screen controls) keep working when the
 // reader view unmounts during navigation.
 
+import {
+  DEFAULT_PARAGRAPH_PAUSE_MS,
+  DEFAULT_SENTENCE_PAUSE_MS,
+  clampParagraphPauseMs,
+  clampSentencePauseMs,
+  startsNewParagraph,
+} from "./types";
+import type { PlaybackPacingSettings, Sentence } from "./types";
+import { loadVolume } from "./volume";
+
 export type GlobalStatus = "idle" | "loading" | "playing" | "paused" | "error";
+
+/** Final-seconds window over which the sleep timer fades volume to silence. */
+export const SLEEP_FADE_SECONDS = 60;
+
+/**
+ * Linear sleep-fade scaling of the user's master volume. Full volume until
+ * the final 60 seconds, then attenuating to silence at expiry.
+ */
+export function sleepFadeVolume(
+  masterVolume: number,
+  remainingSec: number | null,
+): number {
+  if (remainingSec === null || remainingSec > SLEEP_FADE_SECONDS) {
+    return masterVolume;
+  }
+  return masterVolume * Math.max(0, remainingSec / SLEEP_FADE_SECONDS);
+}
+
+/** Apply the faded effective volume for the given sleep countdown. */
+export function applySleepFadedVolume(
+  audio: HTMLAudioElement | null,
+  remainingSec: number | null,
+): void {
+  if (!audio) return;
+  try {
+    audio.volume = sleepFadeVolume(loadVolume(), remainingSec);
+  } catch {
+    // ignore
+  }
+}
+
+/** Restore the user's persisted volume after a sleep fade ends. */
+export function restoreUserVolume(audio: HTMLAudioElement | null): void {
+  if (!audio) return;
+  try {
+    audio.volume = loadVolume();
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Breath-pause delay before speaking `next`: the paragraph pause when it
+ * starts a new paragraph, otherwise the sentence pause (0 disables).
+ */
+export function resolveInterSentencePauseMs(
+  prev: Sentence | undefined,
+  next: Sentence | undefined,
+  pacing: PlaybackPacingSettings,
+): number {
+  const sentenceMs = clampSentencePauseMs(
+    pacing.sentencePauseMs ?? DEFAULT_SENTENCE_PAUSE_MS,
+  );
+  const paragraphMs = clampParagraphPauseMs(
+    pacing.paragraphPauseMs ?? DEFAULT_PARAGRAPH_PAUSE_MS,
+  );
+  return startsNewParagraph(prev, next) ? paragraphMs : sentenceMs;
+}
 
 export interface NowPlayingMeta {
   docId: string;

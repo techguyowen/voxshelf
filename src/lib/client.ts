@@ -321,3 +321,87 @@ export function safeFilename(name: string, ext: string): string {
   const base = name.replace(/[^\w\d-_]+/g, "_").slice(0, 80) || "voxshelf";
   return `${base}.${ext}`;
 }
+
+/** One Anki-importable question/answer pair. */
+export interface AnkiCard {
+  front: string;
+  back: string;
+}
+
+/** Collapse whitespace so a field survives tab-separated export. */
+function tsvField(value: string): string {
+  return value
+    .replace(/[\t\n\r]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
+ * Standard Anki import format: one `Question\tAnswer\tTags` line per card,
+ * with a trailing newline.
+ */
+export function buildAnkiTsv(
+  cards: AnkiCard[],
+  tags: string[] = ["voxshelf"],
+): string {
+  if (cards.length === 0) return "";
+  const tagCol = tags.map(tsvField).filter(Boolean).join(" ");
+  return (
+    cards.map((c) => `${tsvField(c.front)}\t${tsvField(c.back)}\t${tagCol}`).join("\n") + "\n"
+  );
+}
+
+const OBSIDIAN_COLOR_DOT: Record<string, string> = {
+  yellow: "🟡",
+  blue: "🔵",
+  green: "🟢",
+  purple: "🟣",
+  pink: "🩷",
+};
+
+function yamlQuoted(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/[\n\r]+/g, " ")}"`;
+}
+
+/**
+ * Obsidian-ready markdown: YAML frontmatter followed by every highlight with
+ * its color indicator, sentence/position context, user note, and timestamp.
+ */
+export function buildObsidianHighlightsMarkdown(
+  doc: DocumentDetail,
+  highlights: Highlight[],
+): string {
+  const sorted = [...highlights].sort((a, b) => a.sentenceIdx - b.sentenceIdx);
+  const total = doc.sentenceCount || doc.sentences.length || 1;
+  const lines: string[] = [
+    "---",
+    `title: ${yamlQuoted(doc.title)}`,
+    `author: ${yamlQuoted(doc.author ?? "")}`,
+    `source: ${yamlQuoted(doc.sourceUrl ?? doc.sourceType)}`,
+    `exported_at: ${yamlQuoted(new Date().toISOString())}`,
+    "tags: [voxshelf, highlights, reading]",
+    "---",
+    "",
+    `# ${doc.title} — Highlights`,
+    "",
+  ];
+  sorted.forEach((h, i) => {
+    const pct = Math.round(((h.sentenceIdx + 1) / total) * 100);
+    const dot = OBSIDIAN_COLOR_DOT[h.color] ?? "⬜";
+    lines.push(
+      `## ${dot} ${i + 1}. Sentence ${h.sentenceIdx + 1} of ${total} (${pct}%) — ${h.color}`,
+      "",
+    );
+    for (const line of h.text.split("\n")) lines.push(`> ${line}`);
+    lines.push("");
+    const prev = doc.sentences[h.sentenceIdx - 1]?.text;
+    const next = doc.sentences[h.sentenceIdx + 1]?.text;
+    const context = [prev, next].filter(Boolean).join(" ");
+    if (context) {
+      lines.push("**Context:**", "", `> *${context}*`, "");
+    }
+    if (h.note) lines.push(`**Note:** ${h.note}`, "");
+    lines.push(`*Added: ${new Date(h.createdAt).toLocaleString()}*`, "");
+  });
+  return lines.join("\n");
+}

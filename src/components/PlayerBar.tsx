@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client";
-import { getSharedAudio } from "@/lib/globalPlayer";
+import { getSharedAudio, sleepFadeVolume } from "@/lib/globalPlayer";
 import { haptic } from "@/lib/haptics";
 import {
   VOLUME_CHANGE_EVENT,
@@ -69,7 +69,13 @@ function Equalizer() {
  * the icon toggles mute; dragging the slider sets the shared audio element's
  * volume. Both persist to localStorage.
  */
-function VolumeControl({ iconBtn }: { iconBtn: string }) {
+function VolumeControl({
+  iconBtn,
+  sleepLeft,
+}: {
+  iconBtn: string;
+  sleepLeft: number | null;
+}) {
   const [volume, setVolume] = useState<number>(() =>
     typeof window === "undefined" ? 1 : loadVolume(),
   );
@@ -99,7 +105,10 @@ function VolumeControl({ iconBtn }: { iconBtn: string }) {
     const audio = getSharedAudio();
     if (audio) {
       try {
-        audio.volume = volume;
+        // While the sleep timer fades, the element carries the attenuated
+        // effective volume; the persisted master volume stays untouched so it
+        // can be restored when the timer ends or is cancelled.
+        audio.volume = sleepFadeVolume(volume, sleepLeft);
         audio.muted = muted;
       } catch {
         // ignore
@@ -107,7 +116,7 @@ function VolumeControl({ iconBtn }: { iconBtn: string }) {
     }
     saveVolume(volume);
     saveMuted(muted);
-  }, [volume, muted]);
+  }, [volume, muted, sleepLeft]);
 
   const silent = muted || volume === 0;
   const Icon = silent ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
@@ -368,7 +377,7 @@ export function PlayerBar({
             </p>
           </div>
 
-          <VolumeControl iconBtn={iconBtn} />
+          <VolumeControl iconBtn={iconBtn} sleepLeft={player.sleepLeft} />
 
           <button
             onClick={() => setExpanded((v) => !v)}

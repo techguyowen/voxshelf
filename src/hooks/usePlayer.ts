@@ -1,16 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { loadAppearance } from "@/components/AppearanceMenu";
 import { api } from "@/lib/client";
 import {
+  applySleepFadedVolume,
   getEngine,
   getNowPlaying,
   getSharedAudio,
   registerEngine,
   releaseEngine,
+  resolveInterSentencePauseMs,
+  restoreUserVolume,
 } from "@/lib/globalPlayer";
 import { offlineAudioUrl } from "@/lib/offlineStore";
 import type { DocumentDetail } from "@/lib/types";
 import { stopVoicePreview } from "@/lib/voicePreview";
-import { applyStoredVolume, loadVolume } from "@/lib/volume";
+import { applyStoredVolume } from "@/lib/volume";
 
 export type PlayerStatus = "idle" | "loading" | "playing" | "paused" | "error";
 
@@ -158,7 +162,16 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const filterRef = useRef(opts.filterSentence);
   const sleepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sleepTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rafRef = useRef<number | null>(null);
+
+  /** Cancel a pending breath pause (seek / skip / pause bypass it instantly). */
+  const clearPendingPause = useCallback(() => {
+    if (pauseTimerRef.current) {
+      clearTimeout(pauseTimerRef.current);
+      pauseTimerRef.current = null;
+    }
+  }, []);
 
   docRef.current = doc;
   statusRef.current = status;
@@ -326,6 +339,8 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       if (!d || d.sentences.length === 0) return;
       // A voice-audition preview must never overlap document audio.
       stopVoicePreview();
+      // Any explicit navigation bypasses a pending breath pause.
+      clearPendingPause();
       const clamped = resolveReadable(
         idx,
         idx < currentIdxRef.current ? -1 : 1,
@@ -373,16 +388,17 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         setError(e instanceof Error ? e.message : "Playback failed.");
       }
     },
-    [ensureAudio, reportProgress, resolveReadable],
+    [ensureAudio, reportProgress, resolveReadable, clearPendingPause],
   );
 
   const pause = useCallback(() => {
     opRef.current += 1;
+    clearPendingPause();
     const audio = audioRef.current;
     if (audio) audio.pause();
     setStatus((s) => (s === "playing" || s === "loading" ? "paused" : s));
     reportProgress(currentIdxRef.current);
-  }, [reportProgress]);
+  }, [reportProgress, clearPendingPause]);
 
   const play = useCallback(() => {
     stopVoicePreview();
@@ -445,6 +461,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       const d = docRef.current;
       const audio = audioRef.current;
       if (!d || !audio) return;
+      clearPendingPause();
       const op = ++opRef.current;
       const wasPlaying = statusRef.current === "playing";
       try {
@@ -506,7 +523,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         setError(e instanceof Error ? e.message : "Seek failed.");
       }
     },
-    [goTo, loadClipOnly, reportProgress],
+    [goTo, loadClipOnly, reportProgress, clearPendingPause],
   );
 
   const setSpeed = useCallback((v: number) => {
@@ -528,14 +545,8 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     if (sleepTickRef.current) clearInterval(sleepTickRef.current);
     sleepTimeoutRef.current = null;
     sleepTickRef.current = null;
-    if (audioRef.current) {
-      try {
-        // Restore the user's chosen volume (not full blast) after a fade.
-        audioRef.current.volume = loadVolume();
-      } catch {
-        // ignore
-      }
-    }
+    // Restore the user's chosen volume (not full blast) after a fade.
+    restoreUserVolume(audioRef.current);
     setSleepLeft(null);
     setSleepEndOfDoc(false);
   }, []);
@@ -551,27 +562,14 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       if (minutes <= 0) return;
       const end = Date.now() + minutes * 60_000;
       setSleepLeft(minutes * 60);
-      if (audioRef.current) {
-        try {
-          audioRef.current.volume = loadVolume();
-        } catch {
-          // ignore
-        }
-      }
+      // A (re)started timer always begins back at the user's chosen volume.
+      restoreUserVolume(audioRef.current);
       sleepTickRef.current = setInterval(() => {
         const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
         setSleepLeft(left);
-        // Gentle linear fade-out over the final 30 seconds, relative to the
-        // user's chosen base volume.
-        const audio = audioRef.current;
-        if (audio) {
-          try {
-            const base = loadVolume();
-            audio.volume = left <= 30 ? Math.max(0, base * (left / 30)) : base;
-          } catch {
-            // ignore
-          }
-        }
+        // Smooth linear fade-out over the final 60 seconds, relative to the
+        // user's chosen base volume, so expiry never cuts audio abruptly.
+        applySleepFadedVolume(audioRef.current, left);
         if (left <= 0 && sleepTickRef.current) {
           clearInterval(sleepTickRef.current);
           sleepTickRef.current = null;
@@ -629,14 +627,37 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     if (!d) return;
     const idx = currentIdxRef.current;
     if (idx < d.sentences.length - 1) {
-      void goTo(idx + 1, true);
+      // Breath pause before the next sentence (fresh read: slider changes
+      // apply to the very next transition). Seeking/skipping/pausing clears
+      // the pending timer via clearPendingPause, bypassing the delay.
+      let delayMs = 0;
+      try {
+        delayMs = resolveInterSentencePauseMs(
+          d.sentences[idx],
+          d.sentences[idx + 1],
+          loadAppearance(),
+        );
+      } catch {
+        delayMs = 0;
+      }
+      if (delayMs > 0) {
+        clearPendingPause();
+        const op = opRef.current;
+        pauseTimerRef.current = setTimeout(() => {
+          pauseTimerRef.current = null;
+          if (op !== opRef.current) return;
+          void goTo(idx + 1, true);
+        }, delayMs);
+      } else {
+        void goTo(idx + 1, true);
+      }
     } else {
       setStatus("paused");
       setClipProgress(1);
       reportProgress(idx);
       clearSleep();
     }
-  }, [goTo, reportProgress, clearSleep]);
+  }, [goTo, reportProgress, clearSleep, clearPendingPause]);
 
   // --- audio element lifecycle (shared element survives navigation) ---
   useEffect(() => {
@@ -697,6 +718,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
 
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      clearPendingPause();
       // The shared element keeps playing in the background on unmount so
       // navigation never interrupts listening; only detach our listeners.
       audio.removeEventListener("timeupdate", onTimeUpdate);
@@ -750,6 +772,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
       setClipProgress(0);
       setCurrentWord(-1);
     }
+    clearPendingPause();
     clearSleep();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc?.id]);
