@@ -22,22 +22,38 @@
   "build": {
     "appId": "app.voxshelf",
     "productName": "VoxShelf",
-    "directories": { "output": "dist" },
-    "files": ["electron/**/*", ".next/standalone/**/*", "package.json"],
-    "asarUnpack": [".next/standalone/**/*", "**/*.node"],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "electron/**/*",
+      ".next/standalone/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      ".next/standalone/**/*",
+      "**/*.node"
+    ],
     "npmRebuild": false,
     "mac": {
       "icon": "electron/assets/icon.icns",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.music"
     },
     "win": {
       "icon": "electron/assets/icon.ico",
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "linux": {
       "icon": "electron/assets/icon.png",
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Audio",
       "syncDesktopName": true
     }
@@ -65,13 +81,13 @@
     "autoprefixer": "^10.4.20",
     "electron": "^44.5.0",
     "electron-builder": "^26.15.3",
-    "postcss": "^8.5.31",
+    "postcss": "^8.5.3",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.0.0"
   },
   "overrides": {
     "braces": "^3.0.3",
-    "postcss": "^8.5.31",
-    "postcss-selector-parser": "^7.1.6"
+    "postcss-selector-parser": "^7.1.6",
+    "sprintf-js": "^1.1.3"
   }
 }
