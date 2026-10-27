@@ -808,6 +808,7 @@ export function ReaderView({ docId }: { docId: string }) {
   const [prerenderStats, setPrerenderStats] = useState<PrerenderStats | null>(null);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [pronOpen, setPronOpen] = useState(false);
+  const [selectedPronWord, setSelectedPronWord] = useState<string | undefined>(undefined);
   const [resumeDismissed, setResumeDismissed] = useState(false);
   const initialProgressRef = useRef<number | null>(null);
   const [offlineMode, setOfflineMode] = useState(false);
@@ -1706,6 +1707,15 @@ export function ReaderView({ docId }: { docId: string }) {
           <FastForward size={19} />
         </button>
         <button
+          onClick={() => setPronOpen(true)}
+          className="flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          aria-label="Phonetic Pronunciations"
+          title="Phonetic Pronunciations"
+        >
+          <Volume2 size={15} />
+          <span className="hidden sm:inline">Phonetic Pronunciations</span>
+        </button>
+        <button
           onClick={() => setPrefs((p) => ({ ...p, rulerMode: !p.rulerMode }))}
           className={`rounded-lg p-2 ${prefs.rulerMode ? "bg-amber-200 text-amber-900 dark:bg-amber-900/60 dark:text-amber-200" : "text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"}`}
           aria-label="Toggle reading ruler"
@@ -2086,6 +2096,17 @@ export function ReaderView({ docId }: { docId: string }) {
               <StickyNote size={14} /> Note
             </button>
             <button
+              onClick={() => {
+                if (!selection) return;
+                setSelectedPronWord(selection.text.trim());
+                setPronOpen(true);
+              }}
+              title="Create a pronunciation rule for the selected text"
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <Volume2 size={14} /> Pronounce as...
+            </button>
+            <button
               onClick={clearSelection}
               className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
               aria-label="Dismiss"
@@ -2187,7 +2208,15 @@ export function ReaderView({ docId }: { docId: string }) {
       ) : (
         <PlayerBar player={player} doc={doc} onOpenAI={() => openAi("summary")} />
       )}
-      {pronOpen && <PronunciationModal onClose={() => setPronOpen(false)} />}
+      {pronOpen && (
+        <PronunciationModal
+          initialWord={selectedPronWord}
+          onClose={() => {
+            setPronOpen(false);
+            setSelectedPronWord(undefined);
+          }}
+        />
+      )}
       <AutoSkipModal
         open={showAutoSkip}
         onClose={() => setShowAutoSkip(false)}

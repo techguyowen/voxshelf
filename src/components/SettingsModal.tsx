@@ -561,6 +561,7 @@ export function SettingsModal({
   const [clearing, setClearing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [pronOpen, setPronOpen] = useState(false);
+  const [pronCount, setPronCount] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
@@ -591,6 +592,14 @@ export function SettingsModal({
       live = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (pronOpen) return;
+    api
+      .listPronunciations()
+      .then((res) => setPronCount(res.rules.length))
+      .catch(() => {});
+  }, [pronOpen]);
 
   async function fetchModels() {
     setModelsLoading(true);
@@ -874,17 +883,28 @@ export function SettingsModal({
             <SyncSection />
           </Section>
 
-          <Section title="Pronunciation">
+          <Section title="Pronunciation Dictionary">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              Configure custom phonetic replacements for names, acronyms, and technical terms.
+            </p>
             <button
               onClick={() => setPronOpen(true)}
               className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
             >
               <BookOpenText size={16} />
-              Open Pronunciation Dictionary
+              Manage Rules
+              {pronCount !== null && pronCount > 0 && (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
+                  {pronCount}
+                </span>
+              )}
             </button>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Fix how names and tricky words are spoken across every document.
-            </p>
+            {pronCount !== null && pronCount > 0 && (
+              <p className="flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                {pronCount} phonetic rule{pronCount === 1 ? "" : "s"} active
+              </p>
+            )}
           </Section>
 
           <Section title="Audio cache">

@@ -24,19 +24,32 @@ function applyPreview(
   }
 }
 
-export function PronunciationModal({ onClose }: { onClose: () => void }) {
+export function PronunciationModal({ onClose, initialWord }: { onClose: () => void; initialWord?: string }) {
   const [rules, setRules] = useState<PronunciationRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialWord ?? "");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [word, setWord] = useState("");
+  const [word, setWord] = useState(initialWord ?? "");
   const [replacement, setReplacement] = useState("");
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [saving, setSaving] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewText, setPreviewText] = useState("The quick brown fox jumps over the lazy dog.");
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const wordInputRef = useRef<HTMLInputElement | null>(null);
+  const replacementInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const seed = initialWord?.trim();
+    if (seed) {
+      setWord(seed);
+      setQuery(seed);
+      replacementInputRef.current?.focus();
+    } else {
+      wordInputRef.current?.focus();
+    }
+  }, [initialWord]);
 
   useEffect(() => {
     let live = true;
@@ -162,6 +175,7 @@ export function PronunciationModal({ onClose }: { onClose: () => void }) {
           </p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <input
+              ref={wordInputRef}
               value={word}
               onChange={(e) => setWord(e.target.value)}
               placeholder="Word, e.g. read (or /regex/)"
@@ -169,6 +183,7 @@ export function PronunciationModal({ onClose }: { onClose: () => void }) {
               aria-label="Word to replace"
             />
             <input
+              ref={replacementInputRef}
               value={replacement}
               onChange={(e) => setReplacement(e.target.value)}
               placeholder="Say instead, e.g. red"
