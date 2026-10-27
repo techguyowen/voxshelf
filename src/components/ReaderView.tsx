@@ -75,6 +75,7 @@ import { DownloadToDeviceModal } from "./DownloadToDeviceModal";
 import { TOCDrawer } from "./TOCDrawer";
 import { PrerenderModal } from "./PrerenderModal";
 import { PronunciationModal } from "./PronunciationModal";
+import { RSVPModal } from "./RSVPModal";
 import {
   AppearanceMenu,
   DEFAULT_APPEARANCE,
@@ -683,6 +684,7 @@ export function ReaderView({ docId }: { docId: string }) {
   const [aiTab, setAiTab] = useState<AiTab>("summary");
   const [tocOpen, setTocOpen] = useState(false);
   const [castOpen, setCastOpen] = useState(false);
+  const [rsvpOpen, setRsvpOpen] = useState(false);
 
   const hasOriginalAudio = Boolean(doc?.originalAudioUrl);
   const [playbackSource, setPlaybackSource] = useState<"original" | "gemini">("original");
@@ -1536,6 +1538,7 @@ export function ReaderView({ docId }: { docId: string }) {
   const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
   keyHandlerRef.current = (e: KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (rsvpOpen) return; // RSVP modal owns all shortcuts (incl. Escape) while open.
     if (e.key === "Escape") {
       if (castOpen) setCastOpen(false);
       else if (aiOpen) setAiOpen(false);
@@ -1723,6 +1726,15 @@ export function ReaderView({ docId }: { docId: string }) {
           aria-pressed={prefs.rulerMode}
         >
           <Focus size={19} />
+        </button>
+        <button
+          onClick={() => setRsvpOpen(true)}
+          className="flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          aria-label="Speed Reader (RSVP Mode)"
+          title="Speed Reader (RSVP Mode)"
+        >
+          <Zap size={15} />
+          <span className="hidden sm:inline">⚡ Speed Reader</span>
         </button>
         <button
           onClick={() => addBookmark("")}
@@ -2273,6 +2285,15 @@ export function ReaderView({ docId }: { docId: string }) {
         doc={doc}
         onUpdateDoc={(updated) => setDoc(updated)}
       />
+      {rsvpOpen && (
+        <RSVPModal
+          doc={doc}
+          currentSentenceIdx={player.currentIdx}
+          isPlayingAudio={player.status === "playing"}
+          onSeekSentence={(idx) => player.goTo(idx, false)}
+          onClose={() => setRsvpOpen(false)}
+        />
+      )}
     </div>
   );
 }

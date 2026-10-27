@@ -1158,6 +1158,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     toggle,
     playFrom,
     seekTo,
+    goTo,
     next,
     prev,
     skip,
