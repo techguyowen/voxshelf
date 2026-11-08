@@ -14,6 +14,7 @@ import {
   LayoutGrid,
   Link2,
   List,
+  ListPlus,
   Loader2,
   Mic,
   Pencil,
@@ -34,9 +35,11 @@ import {
   removeDocumentFromDevice,
   saveDocumentToDevice,
 } from "@/lib/offlineStore";
+import { enqueueDocument, enqueueMultiple, getQueueState, subscribeQueue } from "@/lib/queue";
 import { estimateSecondsLeft, formatDuration } from "@/lib/readingTime";
 import type { DocumentSummary, Folder, SourceType } from "@/lib/types";
 import { useUI } from "./AppShell";
+import { BatchAudiobookModal } from "./BatchAudiobookModal";
 import { Modal } from "./Modal";
 import { PrerenderModal } from "./PrerenderModal";
 import { useToast } from "./Toast";
@@ -101,6 +104,15 @@ function readingTimeBadge(doc: DocumentSummary): string {
   return `📖 ${formatDuration(estimateSecondsLeft(wordsLeft, speed))} left @ ${speed.toFixed(1)}x`;
 }
 
+function toQueueItem(doc: DocumentSummary) {
+  return {
+    docId: doc.id,
+    title: doc.title,
+    author: doc.author,
+    sentenceCount: doc.sentenceCount,
+  };
+}
+
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diff / 60000);
@@ -154,6 +166,17 @@ export function Library() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = useState(false);
+  const [batchStudioOpen, setBatchStudioOpen] = useState(false);
+  const [queuedIds, setQueuedIds] = useState<Set<string>>(() =>
+    typeof window === "undefined"
+      ? new Set()
+      : new Set(getQueueState().items.map((i) => i.docId)),
+  );
+
+  useEffect(
+    () => subscribeQueue((s) => setQueuedIds(new Set(s.items.map((i) => i.docId)))),
+    [],
+  );
   const [libDragOver, setLibDragOver] = useState(false);
   const dragDepth = useRef(0);
 
@@ -260,6 +283,11 @@ export function Library() {
   const filtered = useMemo(
     () => (onDeviceOnly ? docs.filter((d) => deviceMap[d.id]) : docs),
     [docs, onDeviceOnly, deviceMap],
+  );
+
+  const unreadDocs = useMemo(
+    () => filtered.filter((d) => progressPct(d) < 100),
+    [filtered],
   );
 
   const activeQuery = debouncedQ || q.trim();
@@ -525,6 +553,27 @@ export function Library() {
     }
   }
 
+  function queueDoc(doc: DocumentSummary) {
+    enqueueDocument(toQueueItem(doc));
+    toast.success(`Added "${doc.title}" to queue`);
+  }
+
+  function queueSelected() {
+    const docsToQueue = filtered.filter((d) => selected.has(d.id));
+    if (docsToQueue.length === 0) return;
+    enqueueMultiple(docsToQueue.map(toQueueItem));
+    toast.success(
+      `Queued ${docsToQueue.length} document${docsToQueue.length === 1 ? "" : "s"}.`,
+    );
+  }
+
+  function playUnread() {
+    const next = unreadDocs.slice(0, 10);
+    if (next.length === 0) return;
+    enqueueMultiple(next.map(toQueueItem));
+    router.push(`/reader/${next[0].id}?autoplay=1`);
+  }
+
   async function exportDoc(doc: DocumentSummary, format: "txt" | "md") {
     setBusyId(doc.id);
     try {
@@ -781,6 +830,24 @@ export function Library() {
           >
             <Archive size={15} />
             <span className="hidden sm:inline">Archived</span>
+          </button>
+          {unreadDocs.length > 0 && (
+            <button
+              onClick={playUnread}
+              className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-emerald-500 px-3.5 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/40"
+              title={`Queue ${Math.min(10, unreadDocs.length)} unread document${Math.min(10, unreadDocs.length) === 1 ? "" : "s"} and start listening`}
+            >
+              <span aria-hidden="true">▶️</span>
+              <span>Play Unread</span>
+            </button>
+          )}
+          <button
+            onClick={() => setBatchStudioOpen(true)}
+            className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-zinc-300 px-3.5 py-2 text-sm font-semibold text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            title="Convert multiple books into audiobooks"
+          >
+            <span aria-hidden="true">🎧</span>
+            <span className="hidden sm:inline">Batch Audiobooks</span>
           </button>
           <button
             onClick={() => openImport()}
@@ -1118,6 +1185,20 @@ export function Library() {
                     <Zap size={16} />
                   </button>
                   <button
+                    onClick={() => queueDoc(doc)}
+                    disabled={busyId === doc.id}
+                    className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-1.5 disabled:opacity-50 ${
+                      queuedIds.has(doc.id)
+                        ? "text-emerald-600 hover:bg-emerald-100 dark:text-emerald-400 dark:hover:bg-emerald-950"
+                        : "text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                    }`}
+                    title="Add to listening queue"
+                    aria-label={`Add "${doc.title}" to listening queue`}
+                    aria-pressed={queuedIds.has(doc.id)}
+                  >
+                    <ListPlus size={16} />
+                  </button>
+                  <button
                     onClick={() => void exportDoc(doc, "txt")}
                     disabled={busyId === doc.id}
                     className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800"
@@ -1297,6 +1378,14 @@ export function Library() {
         />
       )}
 
+      {batchStudioOpen && (
+        <BatchAudiobookModal
+          existingDocs={docs}
+          onCreatedDocs={() => void refresh()}
+          onClose={() => setBatchStudioOpen(false)}
+        />
+      )}
+
       {selected.size > 0 && (
         <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
           <div
@@ -1341,6 +1430,14 @@ export function Library() {
                 <Download size={14} />
               )}
               Export Selected (.json)
+            </button>
+            <button
+              onClick={queueSelected}
+              disabled={batchBusy}
+              className="flex min-h-[44px] items-center gap-1.5 rounded-lg border border-zinc-300 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <ListPlus size={14} />
+              Queue Selected
             </button>
             <button
               onClick={() => void deleteSelected()}

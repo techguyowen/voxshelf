@@ -1,6 +1,6 @@
 "use client";
 
-import { Expand, Pause, Play, RotateCcw, RotateCw, X } from "lucide-react";
+import { Expand, ListMusic, Pause, Play, RotateCcw, RotateCw, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -12,14 +12,22 @@ import {
   type NowPlayingMeta,
 } from "@/lib/globalPlayer";
 import { haptic } from "@/lib/haptics";
+import { getQueueState, subscribeQueue } from "@/lib/queue";
+import type { PlaybackQueueState } from "@/lib/types";
+import { useUI } from "./AppShell";
 
 export function FloatingMiniPlayer() {
   const pathname = usePathname();
+  const { openQueue } = useUI();
   const [meta, setMeta] = useState<NowPlayingMeta | null>(() =>
     typeof window === "undefined" ? null : getNowPlaying(),
   );
+  const [queue, setQueue] = useState<PlaybackQueueState>(() =>
+    typeof window === "undefined" ? { items: [], autoAdvance: true } : getQueueState(),
+  );
 
   useEffect(() => subscribe(setMeta), []);
+  useEffect(() => subscribeQueue(setQueue), []);
 
   if (!meta) return null;
   // The full reader is visible — no need for the mini-player.
@@ -91,6 +99,19 @@ export function FloatingMiniPlayer() {
             </p>
           </div>
 
+          <button
+            onClick={openQueue}
+            className="relative shrink-0 rounded-lg p-1.5 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            aria-label={queue.items.length > 0 ? `Open listening queue (${queue.items.length} queued)` : "Open listening queue"}
+            title="Listening queue"
+          >
+            <ListMusic size={18} />
+            {queue.items.length > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-600 px-1 text-[9px] font-bold tabular-nums text-white dark:bg-emerald-500 dark:text-zinc-950">
+                {queue.items.length > 99 ? "99+" : queue.items.length}
+              </span>
+            )}
+          </button>
           <Link
             href={`/reader/${meta.docId}`}
             className="flex shrink-0 items-center gap-1 rounded-lg bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"

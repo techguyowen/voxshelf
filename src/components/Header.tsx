@@ -1,9 +1,10 @@
 "use client";
 
-import { AudioLines, BarChart3, Github, HelpCircle, Keyboard, Lock, Moon, Plus, Settings, Sun } from "lucide-react";
+import { AudioLines, BarChart3, Github, Headphones, HelpCircle, Keyboard, ListMusic, Lock, Moon, Plus, Search, Settings, Sun } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/client";
+import { getQueueState, subscribeQueue } from "@/lib/queue";
 import { useUI } from "./AppShell";
 import { useTheme } from "./ThemeContext";
 
@@ -19,9 +20,14 @@ export function Header({
   settingsRev: number;
 }) {
   const { theme, toggle } = useTheme();
-  const { openStats, openTutorial } = useUI();
+  const { openStats, openTutorial, openCommandPalette, openBatchAudiobook, openQueue } = useUI();
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [locked, setLocked] = useState(false);
+  const [queueCount, setQueueCount] = useState(() =>
+    typeof window === "undefined" ? 0 : getQueueState().items.length,
+  );
+
+  useEffect(() => subscribeQueue((s) => setQueueCount(s.items.length)), []);
 
   useEffect(() => {
     let live = true;
@@ -75,6 +81,43 @@ export function Header({
         </nav>
 
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
+          <button
+            onClick={openCommandPalette}
+            className="flex min-h-[44px] items-center gap-1.5 rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 sm:min-h-0 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            aria-label="Search library or run a command (Command K)"
+            title="Search / Command Palette (⌘K)"
+          >
+            <Search size={15} />
+            <span className="hidden sm:inline">Search</span>
+            <kbd className="hidden rounded border border-zinc-300 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 md:inline dark:border-zinc-700 dark:text-zinc-400">
+              ⌘K
+            </kbd>
+          </button>
+
+          <button
+            onClick={openBatchAudiobook}
+            className="flex min-h-[44px] items-center gap-1.5 rounded-full border border-zinc-200 px-2.5 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-100 sm:min-h-0 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            aria-label="Batch audiobooks"
+            title="Batch Audiobooks — convert books into audiobooks"
+          >
+            <Headphones size={15} />
+            <span className="hidden lg:inline">Batch Audiobooks</span>
+          </button>
+
+          <button
+            onClick={openQueue}
+            className="relative flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 sm:min-h-0 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            aria-label={queueCount > 0 ? `Open listening queue (${queueCount} queued)` : "Open listening queue"}
+            title="Listening queue"
+          >
+            <ListMusic size={19} />
+            {queueCount > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-bold tabular-nums text-white dark:bg-emerald-500 dark:text-zinc-950">
+                {queueCount > 99 ? "99+" : queueCount}
+              </span>
+            )}
+          </button>
+
           <button
             onClick={onSettings}
             title={

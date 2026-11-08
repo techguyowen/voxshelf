@@ -7,6 +7,7 @@ import {
   Focus,
   Highlighter,
   Keyboard,
+  Languages,
   Loader2,
   Mic,
   Pause,
@@ -33,8 +34,9 @@ import {
   useState,
 } from "react";
 import { usePlayer } from "@/hooks/usePlayer";
-import { api, formatBytes } from "@/lib/client";
+import { api, downloadTextFile, formatBytes, safeFilename } from "@/lib/client";
 import { getSharedAudio } from "@/lib/globalPlayer";
+import { buildMasterStudyGuideMarkdown } from "@/lib/studyGuide";
 import {
   getOfflineDocument,
   isDocumentOnDevice,
@@ -68,10 +70,12 @@ import type {
   ReaderPrefs,
   Sentence,
   SentenceDialogueTag,
+  TranslationLanguage,
 } from "@/lib/types";
 import { AIDrawer, type TextSelection } from "./AIDrawer";
 import { DialogueCastModal } from "./DialogueCastModal";
 import { DownloadToDeviceModal } from "./DownloadToDeviceModal";
+import { PomodoroTimer } from "./PomodoroTimer";
 import { TOCDrawer } from "./TOCDrawer";
 import { PrerenderModal } from "./PrerenderModal";
 import { PronunciationModal } from "./PronunciationModal";
@@ -109,6 +113,19 @@ const HIGHLIGHT_SWATCHES: { id: HighlightColor; swatch: string }[] = [
   { id: "green", swatch: "#34d399" },
   { id: "purple", swatch: "#a78bfa" },
   { id: "pink", swatch: "#fb7185" },
+];
+
+const TRANSLATION_LANGUAGES: TranslationLanguage[] = [
+  "Spanish",
+  "French",
+  "German",
+  "Japanese",
+  "Mandarin Chinese",
+  "Portuguese",
+  "Italian",
+  "Korean",
+  "Arabic",
+  "Hindi",
 ];
 
 function loadPrefs(): ReaderPrefs {
@@ -310,6 +327,7 @@ const SentenceItem = memo(function SentenceItem({
   bionic,
   dimmed,
   dialogueTag,
+  translatedText,
   onPlay,
 }: {
   sentence: Sentence;
@@ -324,6 +342,7 @@ const SentenceItem = memo(function SentenceItem({
   bionic: boolean;
   dimmed: boolean;
   dialogueTag?: SentenceDialogueTag | null;
+  translatedText?: string;
   onPlay: (idx: number) => void;
 }) {
   return (
@@ -353,6 +372,11 @@ const SentenceItem = memo(function SentenceItem({
         <WordSpans text={displayText} activeWord={activeWord} bionic={bionic} />
       ) : (
         <HighlightedText text={sentence.text} highlights={highlights} bionic={bionic} />
+      )}
+      {translatedText && (
+        <span className="mt-1 block border-l-2 border-emerald-500/40 pl-2.5 text-[0.92em] italic text-zinc-600 dark:text-zinc-400">
+          {translatedText}
+        </span>
       )}
       {loading && (
         <Loader2 size={14} className="ml-2 inline animate-spin text-emerald-600" />
@@ -685,6 +709,10 @@ export function ReaderView({ docId }: { docId: string }) {
   const [tocOpen, setTocOpen] = useState(false);
   const [castOpen, setCastOpen] = useState(false);
   const [rsvpOpen, setRsvpOpen] = useState(false);
+  const [bilingualLang, setBilingualLang] = useState<TranslationLanguage | "">("");
+  const [translations, setTranslations] = useState<Record<number, string>>({});
+  const [translating, setTranslating] = useState(false);
+  const [speakTranslated, setSpeakTranslated] = useState(false);
 
   const hasOriginalAudio = Boolean(doc?.originalAudioUrl);
   const [playbackSource, setPlaybackSource] = useState<"original" | "gemini">("original");
@@ -949,8 +977,24 @@ export function ReaderView({ docId }: { docId: string }) {
     [docId],
   );
 
+  // Original-text → translated-text lookup so the player speaks the
+  // translation when bilingual "Speak Translation" is on.
+  const translationByTextRef = useRef(new Map<string, string>());
+  useEffect(() => {
+    const m = new Map<string, string>();
+    if (doc && speakTranslated && bilingualLang) {
+      for (const s of doc.sentences) {
+        const t = translations[s.idx];
+        if (t) m.set(s.text, t);
+      }
+    }
+    translationByTextRef.current = m;
+  });
+
   const filterSentence = useCallback(
     (text: string) => {
+      const translated = translationByTextRef.current.get(text);
+      if (translated) return { text: translated, shouldSkip: false };
       const out = applyAutoSkip(text, autoSkip);
       return { text: out.text, shouldSkip: out.shouldSkipSentence };
     },
@@ -1131,12 +1175,141 @@ export function ReaderView({ docId }: { docId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc?.id, doc?.originalAudioUrl, appearance.autoPlay, playbackSource, playOriginal, player]);
 
+  // Deep links: ?s=<sentence> jumps to that sentence, ?autoplay=1 starts playback.
+  const deepLinkRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!doc || deepLinkRef.current === doc.id) return;
+    deepLinkRef.current = doc.id;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const s = params.get("s");
+      const autoplay = params.get("autoplay") === "1";
+      if (s !== null) {
+        const parsed = Number.parseInt(s, 10);
+        const idx = Number.isFinite(parsed)
+          ? Math.max(0, Math.min(doc.sentenceCount - 1, parsed))
+          : 0;
+        if (autoplay) {
+          player.goTo(idx, true);
+        } else {
+          player.goTo(idx, false);
+        }
+        requestAnimationFrame(() => {
+          articleRef.current
+            ?.querySelector(`[data-idx="${idx}"]`)
+            ?.scrollIntoView({ block: "center" });
+        });
+      } else if (autoplay) {
+        player.play();
+      }
+    } catch {
+      // ignore malformed query strings
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id]);
+
+  // Bilingual inline translation: prime from cache, then translate the window
+  // around the active sentence; lazily extend as playback advances.
+  const activeSentenceIdxRef = useRef(0);
+  activeSentenceIdxRef.current = activeSentenceIdx;
+  const translationsRef = useRef(translations);
+  translationsRef.current = translations;
+  const translationInflightRef = useRef(false);
+  useEffect(() => {
+    if (!doc || !bilingualLang) return;
+    let live = true;
+    translationInflightRef.current = true;
+    setTranslating(true);
+    const lang = bilingualLang;
+    const id = doc.id;
+    api
+      .getTranslation(id, lang)
+      .then((r) => {
+        if (live && r.translation) {
+          setTranslations({ ...r.translation.sentences });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!live) {
+          translationInflightRef.current = false;
+          return;
+        }
+        const startIdx = Math.max(0, activeSentenceIdxRef.current - 5);
+        api
+          .translateDocument({ documentId: id, language: lang, startIdx, count: 80 })
+          .then((res) => {
+            if (live) {
+              setTranslations((prev) => ({ ...prev, ...res.translation.sentences }));
+            }
+          })
+          .catch((e) => {
+            if (live) toast.error(e instanceof Error ? e.message : "Translation failed.");
+          })
+          .finally(() => {
+            translationInflightRef.current = false;
+            if (live) setTranslating(false);
+          });
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id, bilingualLang]);
+  useEffect(() => {
+    if (!doc || !bilingualLang || translationInflightRef.current) return;
+    const known = translationsRef.current;
+    let missing = false;
+    for (
+      let i = activeSentenceIdx;
+      i < Math.min(doc.sentenceCount, activeSentenceIdx + 20);
+      i++
+    ) {
+      if (!known[i]) {
+        missing = true;
+        break;
+      }
+    }
+    if (!missing) return;
+    let live = true;
+    translationInflightRef.current = true;
+    setTranslating(true);
+    api
+      .translateDocument({
+        documentId: doc.id,
+        language: bilingualLang,
+        startIdx: Math.max(0, activeSentenceIdx - 10),
+        count: 60,
+      })
+      .then((res) => {
+        if (live) {
+          setTranslations((prev) => ({ ...prev, ...res.translation.sentences }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        translationInflightRef.current = false;
+        if (live) setTranslating(false);
+      });
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc?.id, bilingualLang, activeSentenceIdx]);
+
   // Speakable (filtered) text per sentence for display + skip dimming.
   const speakMap = useMemo(() => {
     if (!doc) return new Map<number, { text: string; skipped: boolean }>();
     const m = new Map<number, { text: string; skipped: boolean }>();
-    if (!autoSkip.enabled) return m;
+    const useTranslated = speakTranslated && bilingualLang !== "";
+    if (!autoSkip.enabled && !useTranslated) return m;
     for (const s of doc.sentences) {
+      const t = useTranslated ? translations[s.idx] : undefined;
+      if (t) {
+        m.set(s.idx, { text: t, skipped: false });
+        continue;
+      }
+      if (!autoSkip.enabled) continue;
       const out = applyAutoSkip(s.text, autoSkip);
       m.set(s.idx, {
         text: out.text && out.text.trim() ? out.text : s.text,
@@ -1144,7 +1317,7 @@ export function ReaderView({ docId }: { docId: string }) {
       });
     }
     return m;
-  }, [doc, autoSkip]);
+  }, [doc, autoSkip, speakTranslated, bilingualLang, translations]);
 
   const highlightsBySentence = useMemo(() => {
     const m = new Map<number, Highlight[]>();
@@ -1416,6 +1589,30 @@ export function ReaderView({ docId }: { docId: string }) {
     },
     [doc],
   );
+
+  function exportStudyGuide() {
+    if (!doc) return;
+    const notes = doc.audioNotes
+      ? {
+          summary: doc.audioNotes.summary ?? undefined,
+          keyPoints: doc.audioNotes.keyPoints ?? undefined,
+          actionItems: doc.audioNotes.actionItems ?? undefined,
+          notes: doc.audioNotes.notes ?? undefined,
+        }
+      : null;
+    downloadTextFile(
+      safeFilename(`${doc.title}-study-guide`, "md"),
+      buildMasterStudyGuideMarkdown({
+        doc,
+        studyNotes: notes,
+        highlights,
+        bookmarks,
+        quiz: null,
+      }),
+      "text/markdown",
+    );
+    toast.success("Exported Master Study Guide (.md)!");
+  }
 
   const jumpTo = useCallback(
     (idx: number) => {
@@ -1835,6 +2032,15 @@ export function ReaderView({ docId }: { docId: string }) {
           <span className="hidden sm:inline">🎙️ Podcast</span>
         </button>
         <button
+          onClick={exportStudyGuide}
+          className="flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold text-zinc-500 hover:bg-zinc-200/60 dark:text-zinc-400 dark:hover:bg-zinc-800"
+          aria-label="Export study guide as Markdown"
+          title="Download notes, highlights and bookmarks as a Markdown study guide"
+        >
+          <span aria-hidden="true">📚</span>
+          <span className="hidden sm:inline">Study Guide (.md)</span>
+        </button>
+        <button
           onClick={handleDeviceButton}
           className={`flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold ${
             onDevice?.onDevice
@@ -1957,6 +2163,44 @@ export function ReaderView({ docId }: { docId: string }) {
             </select>
           </label>
         )}
+        <PomodoroTimer />
+        <span className="inline-flex items-center gap-1 rounded-full bg-zinc-200/70 px-2.5 py-1 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+          <Languages size={12} />
+          <select
+            value={bilingualLang}
+            onChange={(e) => {
+              const v = e.target.value as TranslationLanguage | "";
+              setBilingualLang(v);
+              setTranslations({});
+              if (!v) setSpeakTranslated(false);
+            }}
+            className="cursor-pointer bg-transparent outline-none dark:bg-zinc-800"
+            aria-label="Bilingual translation language"
+            title="Show inline translations under each sentence"
+          >
+            <option value="">Bilingual: Off</option>
+            {TRANSLATION_LANGUAGES.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+          {translating && <Loader2 size={12} className="animate-spin" />}
+        </span>
+        {bilingualLang && (
+          <button
+            onClick={() => setSpeakTranslated((v) => !v)}
+            aria-pressed={speakTranslated}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+              speakTranslated
+                ? "bg-emerald-600 text-white dark:bg-emerald-500 dark:text-zinc-950"
+                : "bg-zinc-200/70 text-zinc-600 hover:bg-zinc-300/70 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            }`}
+            title="Narrate the translated sentences instead of the original"
+          >
+            Speak Translation
+          </button>
+        )}
         <span
           className="inline-flex items-center gap-1 rounded-full bg-zinc-200/70 px-2.5 py-1 text-[11px] font-medium tabular-nums text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
           title={`Full-document synthesis estimate for ${doc.totalChars.toLocaleString()} characters at ~$0.02 / 100k chars`}
@@ -2071,6 +2315,7 @@ export function ReaderView({ docId }: { docId: string }) {
               bionic={prefs.bionicReading}
               dimmed={prefs.focusMask}
               dialogueTag={dialogueTagsBySentence.get(s.idx) || null}
+              translatedText={bilingualLang ? translations[s.idx] : undefined}
               onPlay={handlePlay}
             />
           );

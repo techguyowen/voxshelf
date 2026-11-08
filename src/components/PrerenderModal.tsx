@@ -441,10 +441,22 @@ export function PrerenderModal({
           )}
           <div className="flex flex-wrap justify-center gap-2">
             <a
-              href={`/api/documents/${docId}/audio?download=1`}
+              href={api.getAudiobookExportUrl(docId, { format: "chapter-zip" })}
               className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
             >
-              <Download size={16} /> Download full WAV
+              <Download size={16} /> Download Chaptered Audiobook (.zip)
+            </a>
+            <a
+              href={api.getAudiobookExportUrl(docId, { format: "m4b" })}
+              className="flex items-center gap-1.5 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+            >
+              <Download size={16} /> Download Apple Books M4B (.m4b)
+            </a>
+            <a
+              href={api.getAudiobookExportUrl(docId, { format: "wav" })}
+              className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            >
+              <Download size={16} /> Download Full WAV (.wav)
             </a>
             <button
               onClick={onClose}

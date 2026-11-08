@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { loadAppearance } from "@/components/AppearanceMenu";
 import { ApiError, api } from "@/lib/client";
+import { applyAmbientSleepFade, notifyNarrationPlaying } from "@/lib/ambientAudio";
 import {
   applySleepFadedVolume,
   getEngine,
@@ -12,6 +13,7 @@ import {
   restoreUserVolume,
 } from "@/lib/globalPlayer";
 import { offlineAudioUrl } from "@/lib/offlineStore";
+import { getQueueState, popNextQueueItem } from "@/lib/queue";
 import type { DocumentDetail } from "@/lib/types";
 import { stopCloudPreview, stopVoicePreview } from "@/lib/voicePreview";
 import { applyStoredVolume, loadMuted, loadVolume } from "@/lib/volume";
@@ -198,6 +200,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   const sleepTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rafRef = useRef<number | null>(null);
+  const sleepEndOfDocRef = useRef(false);
 
   /** Cancel a pending breath pause (seek / skip / pause bypass it instantly). */
   const clearPendingPause = useCallback(() => {
@@ -225,6 +228,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   filterRef.current = opts.filterSentence;
   onDeviceFallbackRef.current = opts.onDeviceFallback;
   dialogueActingOptRef.current = opts.dialogueActingEnabled;
+  sleepEndOfDocRef.current = sleepEndOfDoc;
 
   const isDialogueActingActive = useCallback((): boolean => {
     const d = docRef.current;
@@ -824,6 +828,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
     sleepTickRef.current = null;
     // Restore the user's chosen volume (not full blast) after a fade.
     restoreUserVolume(audioRef.current);
+    applyAmbientSleepFade(null);
     setSleepLeft(null);
     setSleepEndOfDoc(false);
   }, []);
@@ -847,6 +852,7 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         // Smooth linear fade-out over the final 60 seconds, relative to the
         // user's chosen base volume, so expiry never cuts audio abruptly.
         applySleepFadedVolume(audioRef.current ?? getSharedAudio(), left);
+        applyAmbientSleepFade(left);
         if (left <= 0 && sleepTickRef.current) {
           clearInterval(sleepTickRef.current);
           sleepTickRef.current = null;
@@ -932,6 +938,17 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
         void goTo(idx + 1, true);
       }
     } else {
+      if (!sleepEndOfDocRef.current) {
+        const q = getQueueState();
+        if (q.autoAdvance && q.items.length > 0) {
+          const nextItem = popNextQueueItem();
+          if (nextItem) {
+            clearSleep();
+            window.location.assign(`/reader/${nextItem.docId}?autoplay=1`);
+            return;
+          }
+        }
+      }
       setStatus("paused");
       setClipProgress(1);
       reportProgress(idx);
@@ -942,6 +959,10 @@ export function usePlayer(doc: DocumentDetail | null, opts: UsePlayerOpts = {}) 
   // Device utterance completion delegates here (mutable ref avoids a
   // speakDevice → advance → goTo → speakDevice hook cycle).
   advanceRef.current = advance;
+
+  useEffect(() => {
+    notifyNarrationPlaying(status === "playing");
+  }, [status]);
 
   // --- audio element lifecycle (shared element survives navigation) ---
   useEffect(() => {

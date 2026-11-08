@@ -33,6 +33,7 @@ import {
   downloadTextFile,
   safeFilename,
 } from "@/lib/client";
+import { buildMasterStudyGuideMarkdown } from "@/lib/studyGuide";
 import { useToast } from "./Toast";
 import type {
   Bookmark,
@@ -609,6 +610,29 @@ export function AIDrawer({
     toast.success("Exported flashcards to Anki (.tsv)!");
   }
 
+  function exportMasterStudyGuide() {
+    const notes = effectiveNotes
+      ? {
+          summary: effectiveNotes.summary ?? undefined,
+          keyPoints: effectiveNotes.keyPoints ?? undefined,
+          actionItems: effectiveNotes.actionItems ?? undefined,
+          notes: effectiveNotes.notes ?? undefined,
+        }
+      : null;
+    downloadTextFile(
+      safeFilename(`${doc.title}-study-guide`, "md"),
+      buildMasterStudyGuideMarkdown({
+        doc,
+        studyNotes: notes,
+        highlights,
+        bookmarks,
+        quiz,
+      }),
+      "text/markdown",
+    );
+    toast.success("Exported Master Study Guide (.md)!");
+  }
+
   async function downloadHighlightAudio(h: Highlight) {
     if (clipBusy) return;
     setClipBusy(h.id);
@@ -757,6 +781,14 @@ export function AIDrawer({
                       </button>
                     </div>
                   </div>
+
+                  <button
+                    onClick={exportMasterStudyGuide}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+                    title="Download notes, highlights, bookmarks, flashcards and quiz as one Markdown study guide"
+                  >
+                    📚 Export Master Study Guide (.md)
+                  </button>
 
                   {/* Summary Section */}
                   {effectiveNotes.summary && (
@@ -916,9 +948,18 @@ export function AIDrawer({
                   <Loader2 className="animate-spin" size={16} /> Reading document…
                 </div>
               ) : summary ? (
-                <div className="whitespace-pre-wrap rounded-xl bg-zinc-50 p-3 text-sm leading-relaxed dark:bg-zinc-800/60">
-                  {summary}
-                </div>
+                <>
+                  <div className="whitespace-pre-wrap rounded-xl bg-zinc-50 p-3 text-sm leading-relaxed dark:bg-zinc-800/60">
+                    {summary}
+                  </div>
+                  <button
+                    onClick={exportMasterStudyGuide}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400"
+                    title="Download notes, highlights, bookmarks, flashcards and quiz as one Markdown study guide"
+                  >
+                    📚 Export Master Study Guide (.md)
+                  </button>
+                </>
               ) : null}
             </div>
           )}
@@ -1357,6 +1398,13 @@ export function AIDrawer({
                     title="Download highlights with YAML frontmatter for Obsidian"
                   >
                     <Download size={14} /> Export to Obsidian
+                  </button>
+                  <button
+                    onClick={exportMasterStudyGuide}
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 dark:bg-emerald-500 dark:text-zinc-950 dark:hover:bg-emerald-400 transition-colors sm:col-span-2"
+                    title="Download notes, highlights, bookmarks, flashcards and quiz as one Markdown study guide"
+                  >
+                    📚 Export Master Study Guide (.md)
                   </button>
                 </div>
               )}

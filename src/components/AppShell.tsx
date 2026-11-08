@@ -14,8 +14,11 @@ import { Header } from "./Header";
 import { ToastProvider } from "./Toast";
 import { UnlockScreen } from "./UnlockScreen";
 import { api } from "@/lib/client";
+import { BatchAudiobookModal } from "./BatchAudiobookModal";
+import { CommandPaletteModal } from "./CommandPaletteModal";
 import { ImportModal } from "./ImportModal";
 import { KeyboardShortcutsModal } from "./KeyboardShortcutsModal";
+import { QueueDrawer } from "./QueueDrawer";
 import { SettingsModal } from "./SettingsModal";
 import { StatsModal } from "./StatsModal";
 import { TutorialModal } from "./TutorialModal";
@@ -31,6 +34,9 @@ interface UIContextValue {
   closeShortcuts: () => void;
   openStats: () => void;
   openTutorial: () => void;
+  openCommandPalette: () => void;
+  openBatchAudiobook: () => void;
+  openQueue: () => void;
 }
 
 const UIContext = createContext<UIContextValue>({
@@ -43,6 +49,9 @@ const UIContext = createContext<UIContextValue>({
   closeShortcuts: () => {},
   openStats: () => {},
   openTutorial: () => {},
+  openCommandPalette: () => {},
+  openBatchAudiobook: () => {},
+  openQueue: () => {},
 });
 
 export function useUI() {
@@ -63,6 +72,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const [settingsRev, setSettingsRev] = useState(0);
   const [auth, setAuth] = useState<{ locked: boolean; authed: boolean } | null>(null);
 
@@ -88,6 +100,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const closeShortcuts = useCallback(() => setShortcutsOpen(false), []);
   const openStats = useCallback(() => setStatsOpen(true), []);
   const openTutorial = useCallback(() => setTutorialOpen(true), []);
+  const openCommandPalette = useCallback(() => setCmdOpen(true), []);
+  const openBatchAudiobook = useCallback(() => setBatchOpen(true), []);
+  const openQueue = useCallback(() => setQueueOpen(true), []);
   const bumpSettings = useCallback(
     () => setSettingsRev((r) => r + 1),
     [],
@@ -109,6 +124,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       if (isTypingTarget(e.target)) return;
       e.preventDefault();
       setShortcutsOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Global Cmd/Ctrl+K toggles the command palette.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setCmdOpen((v) => !v);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -145,6 +172,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       closeShortcuts,
       openStats,
       openTutorial,
+      openCommandPalette,
+      openBatchAudiobook,
+      openQueue,
     }),
     [
       openImport,
@@ -156,6 +186,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       closeShortcuts,
       openStats,
       openTutorial,
+      openCommandPalette,
+      openBatchAudiobook,
+      openQueue,
     ],
   );
 
@@ -219,6 +252,37 @@ export function AppShell({ children }: { children: ReactNode }) {
           }}
         />
       )}
+      {cmdOpen && (
+        <CommandPaletteModal
+          onClose={() => setCmdOpen(false)}
+          onOpenImport={(tab) => {
+            setCmdOpen(false);
+            openImport(tab);
+          }}
+          onOpenBatchAudiobook={() => {
+            setCmdOpen(false);
+            setBatchOpen(true);
+          }}
+          onOpenSettings={() => {
+            setCmdOpen(false);
+            openSettings();
+          }}
+          onOpenStats={() => {
+            setCmdOpen(false);
+            openStats();
+          }}
+          onOpenShortcuts={() => {
+            setCmdOpen(false);
+            openShortcuts();
+          }}
+          onOpenTutorial={() => {
+            setCmdOpen(false);
+            openTutorial();
+          }}
+        />
+      )}
+      {batchOpen && <BatchAudiobookModal onClose={() => setBatchOpen(false)} />}
+      {queueOpen && <QueueDrawer onClose={() => setQueueOpen(false)} />}
       <FloatingMiniPlayer />
     </UIContext.Provider>
     </ToastProvider>

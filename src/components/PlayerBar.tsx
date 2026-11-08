@@ -3,6 +3,7 @@
 import {
   ChevronDown,
   Download,
+  ListMusic,
   Loader2,
   Pause,
   Play,
@@ -21,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/client";
 import { getSharedAudio, sleepFadeVolume } from "@/lib/globalPlayer";
 import { haptic } from "@/lib/haptics";
+import { getQueueState, subscribeQueue } from "@/lib/queue";
 import {
   VOLUME_CHANGE_EVENT,
   loadMuted,
@@ -28,6 +30,8 @@ import {
   saveMuted,
   saveVolume,
 } from "@/lib/volume";
+import { AmbientMixerButton } from "./AmbientMixerPopover";
+import { useUI } from "./AppShell";
 import { VoicePreviewButton } from "./VoicePreviewButton";
 import {
   cumulativeWordCounts,
@@ -217,6 +221,10 @@ export function PlayerBar({
   const [deviceSupported] = useState(() => isWebSpeechSupported());
   const [expanded, setExpanded] = useState(false);
   const [styleDraft, setStyleDraft] = useState(player.stylePrompt);
+  const { openQueue } = useUI();
+  const [queueCount, setQueueCount] = useState(() => getQueueState().items.length);
+
+  useEffect(() => subscribeQueue((s) => setQueueCount(s.items.length)), []);
 
   useEffect(() => {
     api
@@ -407,6 +415,22 @@ export function PlayerBar({
           </div>
 
           <VolumeControl iconBtn={iconBtn} sleepLeft={player.sleepLeft} />
+
+          <AmbientMixerButton iconBtnClass={iconBtn} />
+
+          <button
+            onClick={openQueue}
+            className={`${iconBtn} relative shrink-0`}
+            aria-label={queueCount > 0 ? `Open listening queue (${queueCount} queued)` : "Open listening queue"}
+            title="Listening queue"
+          >
+            <ListMusic size={20} />
+            {queueCount > 0 && (
+              <span className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-bold tabular-nums text-white dark:bg-emerald-500 dark:text-zinc-950">
+                {queueCount > 99 ? "99+" : queueCount}
+              </span>
+            )}
+          </button>
 
           <button
             onClick={() => setExpanded((v) => !v)}
