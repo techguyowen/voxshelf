@@ -8,6 +8,7 @@ import type {
   DocumentDetail,
   DocumentSummary,
   Folder,
+  GlobalSearchHit,
   Highlight,
   HighlightColor,
   Sentence,
@@ -736,6 +737,93 @@ export function deleteFolder(id: string): boolean {
   const changed = dbRun("DELETE FROM folders WHERE id = ?", id).changes > 0;
   if (changed) recordTombstone("folders", id);
   return changed;
+}
+
+export function searchLibraryFullText(
+  query: string,
+  limit = 40,
+): GlobalSearchHit[] {
+  const q = query.trim();
+  if (!q) return [];
+  const cap = Math.max(1, Math.min(200, Math.floor(limit) || 40));
+  const like = `%${q.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_")}%`;
+  const hits: GlobalSearchHit[] = [];
+  const seen = new Set<string>();
+  const push = (h: GlobalSearchHit) => {
+    const key = `${h.docId}\n${h.sentenceIdx}\n${h.matchType}`;
+    if (seen.has(key) || hits.length >= cap) return;
+    seen.add(key);
+    hits.push(h);
+  };
+
+  const docs = dbAll<
+    DocumentRow & { first_sentence: string | null }
+  >(
+    `SELECT d.*, (SELECT s.text FROM sentences s WHERE s.doc_id = d.id ORDER BY s.idx ASC LIMIT 1) AS first_sentence
+     FROM documents d WHERE d.title LIKE ? ESCAPE '\\' OR d.author LIKE ? ESCAPE '\\' ORDER BY d.updated_at DESC LIMIT ?`,
+    like,
+    like,
+    cap,
+  );
+  for (const d of docs) {
+    push({
+      docId: d.id,
+      docTitle: d.title,
+      author: d.author,
+      sentenceIdx: d.progress_sentence_index || 0,
+      snippet: d.first_sentence || d.title,
+      matchType: "title",
+    });
+  }
+
+  if (hits.length < cap) {
+    const highlights = dbAll<
+      HighlightRow & { doc_title: string; doc_author: string | null }
+    >(
+      `SELECT h.*, d.title AS doc_title, d.author AS doc_author
+       FROM highlights h JOIN documents d ON d.id = h.doc_id
+       WHERE h.text LIKE ? ESCAPE '\\' OR h.note LIKE ? ESCAPE '\\'
+       ORDER BY h.created_at DESC LIMIT ?`,
+      like,
+      like,
+      cap,
+    );
+    for (const h of highlights) {
+      push({
+        docId: h.doc_id,
+        docTitle: h.doc_title,
+        author: h.doc_author,
+        sentenceIdx: h.sentence_idx,
+        snippet: h.note ? `${h.text} — ${h.note}` : h.text,
+        matchType: "highlight",
+        highlightColor: normalizeHighlightColor(h.color),
+      });
+    }
+  }
+
+  if (hits.length < cap) {
+    const sentences = dbAll<
+      SentenceRow & { doc_title: string; doc_author: string | null }
+    >(
+      `SELECT s.*, d.title AS doc_title, d.author AS doc_author
+       FROM sentences s JOIN documents d ON d.id = s.doc_id
+       WHERE s.text LIKE ? ESCAPE '\\' ORDER BY d.updated_at DESC LIMIT ?`,
+      like,
+      cap,
+    );
+    for (const s of sentences) {
+      push({
+        docId: s.doc_id,
+        docTitle: s.doc_title,
+        author: s.doc_author,
+        sentenceIdx: s.idx,
+        snippet: s.text,
+        matchType: "sentence",
+      });
+    }
+  }
+
+  return hits;
 }
 
 export { DEFAULT_VOICE };

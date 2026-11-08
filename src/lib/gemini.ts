@@ -74,6 +74,16 @@ function extractJsonObject(raw: string): string {
   return body.slice(start, end + 1);
 }
 
+function extractJsonArray(raw: string): string {
+  const trimmed = raw.trim();
+  const fenced = /^```(?:json)?\s*([\s\S]*?)```$/i.exec(trimmed);
+  const body = (fenced ? fenced[1] : trimmed).trim();
+  const start = body.indexOf("[");
+  const end = body.lastIndexOf("]");
+  if (start < 0 || end <= start) throw new Error("No JSON array found in model response.");
+  return body.slice(start, end + 1);
+}
+
 async function tryEach<T>(
   models: string[],
   attempt: (model: string) => Promise<T>,
@@ -697,6 +707,42 @@ export async function cleanupDictation(
     const response = await ai.models.generateContent({ model, contents: prompt });
     return partsText(response) || text;
   });
+}
+
+/** Translate a batch of sentences, returning an idx -> translation map. */
+export async function translateSentencesBatch(
+  sentences: { idx: number; text: string }[],
+  targetLanguage: string,
+  overrideKey?: string,
+): Promise<Record<number, string>> {
+  const out: Record<number, string> = {};
+  if (sentences.length === 0) return out;
+  const apiKey = requireKey(overrideKey);
+  const ai = new GoogleGenAI({ apiKey });
+  const prompt =
+    `Translate each sentence below into ${targetLanguage} accurately and naturally, preserving meaning, tone, and punctuation. ` +
+    `Return ONLY a valid JSON array of objects with this exact shape: [{"idx": number, "translation": string}]. ` +
+    `Include every input idx exactly once, with no extra commentary.\n\n` +
+    sentences.map((s) => `[${s.idx}] ${s.text}`).join("\n");
+  const parsed = await tryEach(textModels(), async (model) => {
+    const response = await ai.models.generateContent({
+      model,
+      contents: prompt,
+      config: { responseMimeType: "application/json" },
+    } as never);
+    const raw = partsText(response);
+    if (!raw) throw new GeminiError(`Model ${model} returned empty text.`);
+    return JSON.parse(extractJsonArray(raw)) as unknown;
+  });
+  if (Array.isArray(parsed)) {
+    for (const entry of parsed) {
+      const r = (entry ?? {}) as { idx?: unknown; translation?: unknown };
+      if (typeof r.idx === "number" && typeof r.translation === "string") {
+        out[r.idx] = r.translation;
+      }
+    }
+  }
+  return out;
 }
 
 export async function explainSelection(

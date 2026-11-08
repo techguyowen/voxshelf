@@ -1,6 +1,7 @@
 // Client-side API helpers (fetch wrappers) + small formatters.
 
 import type {
+  AudiobookExportFormat,
   AudioTranscribeAndNoteResult,
   AuthStatus,
   Bookmark,
@@ -10,10 +11,12 @@ import type {
   DialogueAnalysisResult,
   DocumentDetail,
   DocumentSummary,
+  DocumentTranslation,
   ExtractResult,
   Feed,
   FeedItem,
   Folder,
+  GlobalSearchHit,
   Highlight,
   HighlightColor,
   ModelsResponse,
@@ -33,6 +36,7 @@ import type {
   SyncRemoveResult,
   SyncStatusDto,
   SyncSummaryDto,
+  TranslationLanguage,
   TtsResponse,
   VoiceInfo,
 } from "./types";
@@ -326,6 +330,35 @@ export const api = {
     send<SyncDownloadResult>("/api/sync/download", "POST", pick),
   syncRemove: (pick: { docIds?: string[]; folderIds?: string[] }) =>
     send<SyncRemoveResult>("/api/sync/remove", "POST", pick),
+
+  searchLibrary: (q: string, limit = 40) =>
+    get<{ query: string; hits: GlobalSearchHit[] }>(
+      `/api/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+    ),
+
+  getTranslation: (documentId: string, language: TranslationLanguage) =>
+    get<{ translation: DocumentTranslation | null }>(
+      `/api/ai/translate?documentId=${encodeURIComponent(documentId)}&language=${encodeURIComponent(language)}`,
+    ),
+  translateDocument: (input: {
+    documentId: string;
+    language: TranslationLanguage;
+    startIdx?: number;
+    count?: number;
+    force?: boolean;
+  }) => send<{ translation: DocumentTranslation }>("/api/ai/translate", "POST", input),
+
+  getAudiobookExportUrl: (
+    docId: string,
+    opts?: { format?: AudiobookExportFormat; voice?: string; style?: string },
+  ) => {
+    const sp = new URLSearchParams();
+    if (opts?.format) sp.set("format", opts.format);
+    if (opts?.voice) sp.set("voice", opts.voice);
+    if (opts?.style) sp.set("style", opts.style);
+    sp.set("download", "1");
+    return `/api/documents/${docId}/audiobook?${sp.toString()}`;
+  },
 
   authStatus: () => get<AuthStatus>("/api/auth/status"),
   authLogin: (key: string) =>

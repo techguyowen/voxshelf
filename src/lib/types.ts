@@ -484,3 +484,55 @@ export interface FeedItem {
   docId?: string | null;
   createdAt: string;
 }
+
+export interface QueueItem {
+  docId: string;
+  title: string;
+  author: string | null;
+  sentenceCount: number;
+  addedAt: string;
+}
+
+export interface PlaybackQueueState {
+  items: QueueItem[];
+  autoAdvance: boolean;
+}
+
+export interface GlobalSearchHit {
+  docId: string;
+  docTitle: string;
+  author: string | null;
+  sentenceIdx: number;
+  snippet: string;
+  matchType: "title" | "sentence" | "highlight";
+  highlightColor?: HighlightColor;
+}
+
+export type AmbientPreset = "off" | "brown" | "pink" | "rain" | "warm-drone";
+
+export interface AmbientState {
+  preset: AmbientPreset;
+  volume: number;
+  syncWithPlayback: boolean;
+}
+
+export type TranslationLanguage =
+  | "Spanish"
+  | "French"
+  | "German"
+  | "Japanese"
+  | "Mandarin Chinese"
+  | "Portuguese"
+  | "Italian"
+  | "Korean"
+  | "Arabic"
+  | "Hindi";
+
+export interface DocumentTranslation {
+  docId: string;
+  language: TranslationLanguage;
+  sentences: Record<number, string>;
+  updatedAt: string;
+}
+
+export type AudiobookExportFormat = "chapter-zip" | "wav" | "m4b";
