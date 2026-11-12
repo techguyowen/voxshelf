@@ -10,6 +10,12 @@ interface ShortcutGroup {
 
 const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
+    name: "Global",
+    items: [
+      { keys: ["⌘K", "Ctrl+K"], description: "Open Command Palette & Full-Text Search" },
+    ],
+  },
+  {
     name: "Playback & Navigation",
     items: [
       { keys: ["Space"], description: "Play / Pause playback" },

@@ -35,6 +35,10 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/package.json ./package.json
 
 RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
+
+# Native .m4b chapterized audiobook exports (audiobookExport.ts shells to ffmpeg).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+
 USER nextjs
 
 LABEL org.opencontainers.image.title="VoxShelf" \

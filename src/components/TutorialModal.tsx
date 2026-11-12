@@ -313,6 +313,7 @@ export function TutorialModal({
                 { keys: ["Space"], label: "Play / pause" },
                 { keys: ["J", "K"], label: "Skip sentence back / forward" },
                 { keys: ["[", "]"], label: "Slower / faster playback" },
+                { keys: ["⌘K"], label: "Command Palette & full-text search" },
                 { keys: ["I"], label: "Open import" },
                 { keys: ["?"], label: "Shortcuts cheat sheet" },
                 { keys: ["📱"], label: "Download to Device for offline" },
@@ -331,6 +332,13 @@ export function TutorialModal({
                   <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">{row.label}</span>
                 </div>
               ))}
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Feature icon={<Keyboard size={18} />} title="Command Palette (⌘K)" body="Jump anywhere and full-text search your whole library in one keystroke." />
+              <Feature icon={<LibraryBig size={18} />} title="Batch Audiobook Studio" body="Convert multiple books to chapterized audiobooks in one batch." />
+              <Feature icon={<Waves size={18} />} title="Ambient Soundscapes" body="Rain and focus noise mixed under narration, synced to playback." />
+              <Feature icon={<Globe size={18} />} title="Bilingual Translation" body="Read inline translations in your language while you listen." />
+              <Feature icon={<Timer size={18} />} title="Pomodoro Study Timer" body="25/5 focus sprints with breaks and a gentle chime." />
             </div>
             <div className="flex items-center gap-2 rounded-xl bg-zinc-900 p-3 text-xs text-zinc-200 dark:bg-zinc-100 dark:text-zinc-900">
               <MoonStar size={16} className="shrink-0" />
