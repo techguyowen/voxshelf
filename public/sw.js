@@ -8,7 +8,7 @@
  */
 
 const AUDIO_CACHE = "voxshelf-offline-audio-v1";
-const STATIC_CACHE = "voxshelf-static-v1";
+const STATIC_CACHE = "voxshelf-v4";
 
 self.addEventListener("install", () => {
   // Take over immediately so offline audio works without a reload.
@@ -114,6 +114,34 @@ self.addEventListener("fetch", (event) => {
     );
     return;
   }
+
+  // 1b. Network-only API metadata/config routes (never serve stale cache).
+  const NETWORK_ONLY_API_PATHS = new Set([
+    "/api/models",
+    "/api/voices",
+    "/api/settings",
+    "/api/health",
+  ]);
+  if (NETWORK_ONLY_API_PATHS.has(url.pathname)) {
+    event.respondWith(
+      fetch(req, { cache: "no-store" }).catch(
+        () =>
+          new Response(
+            JSON.stringify({ ok: false, error: "Network unavailable" }),
+            {
+              status: 503,
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-store",
+              },
+            },
+          ),
+      ),
+    );
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/")) return;
 
   // 2. Navigations: network-first, offline fallback page when unreachable.
   if (req.mode === "navigate") {

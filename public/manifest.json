@@ -62,10 +62,17 @@
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     },
     {
-      "name": "Upload",
-      "short_name": "Upload",
+      "name": "Import Book",
+      "short_name": "Import Book",
       "description": "Open VoxShelf and start an import",
       "url": "/?import=1",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Batch Studio",
+      "short_name": "Batch Studio",
+      "description": "Generate an audiobook in Batch Studio",
+      "url": "/?batch=1",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ]

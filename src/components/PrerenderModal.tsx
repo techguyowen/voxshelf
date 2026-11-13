@@ -13,8 +13,11 @@ import type {
   PrerenderCompleteEvent,
   PrerenderEvent,
   PrerenderStats,
+  PublicSettings,
 } from "@/lib/types";
 import { Modal } from "./Modal";
+
+type HealthData = Awaited<ReturnType<typeof api.health>>;
 
 type Scope = "full" | "from-current" | "next50" | "next100";
 type Phase = "loading" | "config" | "running" | "paused" | "done";
@@ -70,6 +73,8 @@ export function PrerenderModal({
   const [phase, setPhase] = useState<Phase>("loading");
   const [doc, setDoc] = useState<DocumentDetail | null>(null);
   const [stats, setStats] = useState<PrerenderStats | null>(null);
+  const [settings, setSettings] = useState<PublicSettings | null>(null);
+  const [health, setHealth] = useState<HealthData | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>("full");
 
@@ -93,11 +98,18 @@ export function PrerenderModal({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.getDocument(docId), api.getPrerenderStats(docId)])
-      .then(([detail, s]) => {
+    Promise.all([
+      api.getDocument(docId),
+      api.getPrerenderStats(docId),
+      api.settings().catch(() => null),
+      api.health().catch(() => null),
+    ])
+      .then(([detail, s, st, h]) => {
         if (cancelled) return;
         setDoc(detail);
         setStats(s);
+        setSettings(st);
+        setHealth(h);
         setPhase("config");
       })
       .catch((e) => {
@@ -293,15 +305,36 @@ export function PrerenderModal({
           </fieldset>
 
           <div className="rounded-lg bg-zinc-100 px-3 py-2.5 text-sm dark:bg-zinc-800">
-            <span className="font-semibold">
-              Est. cost: {formatUsd(estimateTtsCostUsd(estimate.billable))} (
-              {estimate.billable.toLocaleString()} chars)
-            </span>
-            <span className="text-zinc-500 dark:text-zinc-400">
-              {" "}· Free tier eligible ({FREE_TIER_LIMITS})
-              {estimate.alreadyCached > 0 &&
-                ` · ${estimate.alreadyCached.toLocaleString()} already cached, free`}
-            </span>
+            {doc.voice.startsWith("local:") ||
+            doc.voice.startsWith("device:") ||
+            (settings !== null && !settings.hasApiKey) ||
+            Boolean(settings?.ttsModel.startsWith("local:")) ? (
+              <>
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                  Est. cost: $0.00 (Free · Local Audio)
+                </span>
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  {" "}· {estimate.billable.toLocaleString()} chars
+                  {health?.capabilities?.localTtsEngine
+                    ? ` · Engine: ${health.capabilities.localTtsEngine}`
+                    : ""}
+                  {estimate.alreadyCached > 0 &&
+                    ` · ${estimate.alreadyCached.toLocaleString()} already cached`}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">
+                  Est. cost: {formatUsd(estimateTtsCostUsd(estimate.billable))} (
+                  {estimate.billable.toLocaleString()} chars)
+                </span>
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  {" "}· Free tier eligible ({FREE_TIER_LIMITS})
+                  {estimate.alreadyCached > 0 &&
+                    ` · ${estimate.alreadyCached.toLocaleString()} already cached, free`}
+                </span>
+              </>
+            )}
           </div>
 
           {phase === "paused" && (

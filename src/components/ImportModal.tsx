@@ -460,7 +460,7 @@ function AudioTab({ onSaved }: { onSaved: (id: string) => void }) {
     setError(null);
     setStatusMessage(
       hasLiveTranscript
-        ? (noteMode === "transcript-only" ? "Saving live recording..." : "Extracting structured notes from live transcript with Gemini...")
+        ? (noteMode === "transcript-only" ? "Saving live recording..." : "Extracting structured notes from live transcript...")
         : "Uploading audio and transcribing with Gemini 3.5..."
     );
 
@@ -962,7 +962,7 @@ function UploadTab({ onSaved }: { onSaved: (id: string) => void }) {
           onChange={(e) => setCleanup(e.target.checked)}
           className="h-4 w-4 accent-emerald-600"
         />
-        AI cleanup (fix extraction artifacts — needs API key)
+        AI cleanup (fix extraction artifacts — works offline or with AI)
       </label>
       {busy && (
         <div className="flex items-center justify-center gap-2 py-4 text-sm text-zinc-500">
@@ -1096,7 +1096,7 @@ function ScanTab({ onSaved }: { onSaved: (id: string) => void }) {
             onChange={(e) => setMode(e.target.value)}
             className="rounded-lg border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
           >
-            <option value="auto">Auto (AI if key set)</option>
+            <option value="auto">Auto (Gemini Vision if key set, else on-device)</option>
             <option value="ai">Gemini Vision</option>
             <option value="local">On-device (Tesseract)</option>
           </select>
@@ -1108,7 +1108,7 @@ function ScanTab({ onSaved }: { onSaved: (id: string) => void }) {
             onChange={(e) => setCleanup(e.target.checked)}
             className="h-4 w-4 accent-emerald-600"
           />
-          AI cleanup
+          AI cleanup (works offline or with AI)
         </label>
       </div>
       {preview && (
@@ -1268,7 +1268,7 @@ function UrlTab({ onSaved }: { onSaved: (id: string) => void }) {
           onChange={(e) => setCleanup(e.target.checked)}
           className="h-4 w-4 accent-emerald-600"
         />
-        AI cleanup (needs API key)
+        AI cleanup (works offline or with AI)
       </label>
       <ErrorBox message={error} />
       {result && (

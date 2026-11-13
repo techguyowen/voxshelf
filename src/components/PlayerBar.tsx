@@ -217,6 +217,7 @@ export function PlayerBar({
   onOpenAI: () => void;
 }) {
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
+  const [localVoices, setLocalVoices] = useState<VoiceInfo[]>([]);
   const [deviceVoices, setDeviceVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [deviceSupported] = useState(() => isWebSpeechSupported());
   const [expanded, setExpanded] = useState(false);
@@ -229,8 +230,14 @@ export function PlayerBar({
   useEffect(() => {
     api
       .voices()
-      .then((v) => setVoices(v.voices))
-      .catch(() => setVoices([]));
+      .then((v) => {
+        setVoices(v.voices);
+        setLocalVoices(v.localVoices ?? []);
+      })
+      .catch(() => {
+        setVoices([]);
+        setLocalVoices([]);
+      });
   }, []);
 
   useEffect(() => {
@@ -272,14 +279,19 @@ export function PlayerBar({
   const iconBtn =
     "flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full p-2.5 text-zinc-700 hover:bg-zinc-200/70 dark:text-zinc-200 dark:hover:bg-zinc-800";
 
+  const isLocalVoice = player.voice.startsWith("local:");
   const currentTone = isDeviceVoice(player.voice)
     ? (deviceVoices.find((v) => toDeviceVoiceValue(v.name) === player.voice)
         ?.lang ?? "On-device")
-    : (voices.find((v) => v.name === player.voice)?.description ?? "");
+    : isLocalVoice
+      ? (localVoices.find((v) => (v.id || v.name) === player.voice)?.description ??
+          "Free Local WAV")
+      : (voices.find((v) => v.name === player.voice)?.description ?? "");
   // Keep the select controlled when the current voice isn't listed yet
-  // (cloud list still loading, or a device voice from another machine).
+  // (voice lists still loading, or a device voice from another machine).
   const currentValueListed =
     voices.some((v) => v.name === player.voice) ||
+    localVoices.some((v) => (v.id || v.name) === player.voice) ||
     deviceVoices.some((v) => toDeviceVoiceValue(v.name) === player.voice);
 
   return (
@@ -467,6 +479,13 @@ export function PlayerBar({
               >
                 📱 On-device
               </span>
+            ) : isLocalVoice ? (
+              <span
+                className="hidden rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 sm:inline"
+                title="Free local WAV voice — private, works offline with no API key"
+              >
+                Free Local
+              </span>
             ) : (
               currentTone && (
                 <span
@@ -489,18 +508,21 @@ export function PlayerBar({
                   {deviceVoiceName(player.voice) ?? player.voice}
                 </option>
               )}
-              <optgroup label="Gemini Cloud Voices">
-                {voices.length === 0 && !isDeviceVoice(player.voice) && (
-                  <option value={player.voice}>{player.voice}</option>
-                )}
-                {voices.map((v) => (
-                  <option key={v.name} value={v.name}>
-                    {v.name} · {v.description}
-                  </option>
-                ))}
-              </optgroup>
+              {localVoices.length > 0 && (
+                <optgroup label="Free Local WAV Voices (Offline)">
+                  {localVoices.map((v) => {
+                    const val = v.id || v.name;
+                    return (
+                      <option key={val} value={val}>
+                        {v.name}
+                        {v.description ? ` · ${v.description}` : ""}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              )}
               {deviceSupported && (
-                <optgroup label="Device / Offline Voices">
+                <optgroup label="On-Device Browser Speech (Live)">
                   {deviceVoices.map((v) => (
                     <option
                       key={`${v.name}::${v.lang}`}
@@ -516,6 +538,16 @@ export function PlayerBar({
                   )}
                 </optgroup>
               )}
+              <optgroup label="Gemini Cloud Voices">
+                {voices.length === 0 && !isDeviceVoice(player.voice) && !isLocalVoice && (
+                  <option value={player.voice}>{player.voice}</option>
+                )}
+                {voices.map((v) => (
+                  <option key={v.name} value={v.name}>
+                    {v.name} · {v.description}
+                  </option>
+                ))}
+              </optgroup>
             </select>
             <VoicePreviewButton voice={player.voice} />
           </div>

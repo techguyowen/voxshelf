@@ -11,14 +11,20 @@ import {
   Users,
   Volume2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/client";
 import type {
   CharacterVoiceAssignment,
   DialogueAnalysisResult,
   DocumentDetail,
+  VoiceInfo,
 } from "@/lib/types";
-import { GEMINI_VOICES, VOICE_NAMES } from "@/lib/voices";
+import { GEMINI_VOICES } from "@/lib/voices";
+import {
+  getWebSpeechVoices,
+  isWebSpeechSupported,
+  toDeviceVoiceValue,
+} from "@/lib/webSpeech";
 import { Modal } from "./Modal";
 import { useToast } from "./Toast";
 import { VoicePreviewButton } from "./VoicePreviewButton";
@@ -38,6 +44,32 @@ export function DialogueCastModal({
   const [analyzing, setAnalyzing] = useState(false);
   const [savingVoice, setSavingVoice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cloudVoices, setCloudVoices] = useState<VoiceInfo[]>(GEMINI_VOICES);
+  const [localVoices, setLocalVoices] = useState<VoiceInfo[]>([]);
+  const [deviceVoices, setDeviceVoices] = useState<SpeechSynthesisVoice[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    api
+      .voices()
+      .then((res) => {
+        if (!active) return;
+        if (res.voices?.length) setCloudVoices(res.voices);
+        if (res.localVoices) setLocalVoices(res.localVoices);
+      })
+      .catch(() => {});
+    if (isWebSpeechSupported()) {
+      getWebSpeechVoices()
+        .then((voices) => {
+          if (active) setDeviceVoices(voices);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      active = false;
+    };
+  }, [open]);
 
   const dialogueActing = doc.dialogueActing;
   const isAnalyzed = Boolean(
@@ -145,7 +177,7 @@ export function DialogueCastModal({
               Fiction & Multi-Character Voice Acting
             </h3>
             <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
-              Identify distinct speakers across dialogue and narration, assigning unique Gemini voices to each character.
+              Identify distinct speakers across dialogue and narration, and assign distinct local, on-device, or Gemini voices to each character.
             </p>
           </div>
           {isAnalyzed && (
@@ -181,7 +213,7 @@ export function DialogueCastModal({
               No Characters Detected Yet
             </h4>
             <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-              VoxShelf will analyze the {doc.sentenceCount} sentences in this document with Gemini 3.8 Flash, distinguish spoken dialogue from narration, and assign distinct AI voices to each character.
+              VoxShelf will analyze the {doc.sentenceCount} sentences in this document (using your configured Gemini, Ollama, or local AI model, or built-in offline attribution), distinguish spoken dialogue from narration, and assign distinct voices to each character.
             </p>
             <div className="mt-6 flex justify-center">
               <button
@@ -303,11 +335,42 @@ export function DialogueCastModal({
                             aria-label={`Voice for ${char.character}`}
                             className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-900 outline-none transition focus:border-purple-500 focus:bg-white focus:ring-1 focus:ring-purple-500 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100 dark:focus:border-purple-400 dark:focus:bg-zinc-900"
                           >
-                            {GEMINI_VOICES.map((v) => (
-                              <option key={v.name} value={v.name}>
-                                {v.name} ({v.description})
-                              </option>
-                            ))}
+                            {!localVoices.some((v) => (v.id || v.name) === char.voice) &&
+                              !cloudVoices.some((v) => v.name === char.voice) &&
+                              !deviceVoices.some((v) => toDeviceVoiceValue(v.name) === char.voice) && (
+                                <option value={char.voice}>{char.voice}</option>
+                              )}
+                            {localVoices.length > 0 && (
+                              <optgroup label="Free Local WAV Voices (Offline)">
+                                {localVoices.map((v) => {
+                                  const val = v.id || v.name;
+                                  return (
+                                    <option key={val} value={val}>
+                                      {v.name} — {v.description}
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            )}
+                            {deviceVoices.length > 0 && (
+                              <optgroup label="On-Device Browser Speech (Live)">
+                                {deviceVoices.map((v) => {
+                                  const val = toDeviceVoiceValue(v.name);
+                                  return (
+                                    <option key={val} value={val}>
+                                      {v.name} ({v.lang})
+                                    </option>
+                                  );
+                                })}
+                              </optgroup>
+                            )}
+                            <optgroup label="Gemini Cloud Voices">
+                              {cloudVoices.map((v) => (
+                                <option key={v.name} value={v.name}>
+                                  {v.name} ({v.description})
+                                </option>
+                              ))}
+                            </optgroup>
                           </select>
                         </div>
                         <VoicePreviewButton

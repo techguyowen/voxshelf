@@ -76,6 +76,8 @@ export function BatchAudiobookModal({
 }) {
   const [jobs, setJobs] = useState<BatchBookJob[]>([]);
   const [voices, setVoices] = useState<VoiceInfo[]>([]);
+  const [localVoices, setLocalVoices] = useState<VoiceInfo[]>([]);
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [voice, setVoice] = useState("Kore");
   const [format, setFormat] = useState<AudiobookExportFormat>("chapter-zip");
   const [stylePrompt, setStylePrompt] = useState("");
@@ -114,8 +116,19 @@ export function BatchAudiobookModal({
     Promise.all([api.voices(), api.settings()])
       .then(([v, s]) => {
         if (!live) return;
+        const lv = v.localVoices ?? [];
         setVoices(v.voices);
-        setVoice(s.defaultVoice || v.default || "Kore");
+        setLocalVoices(lv);
+        setHasApiKey(s.hasApiKey);
+        if (!s.hasApiKey && lv.length > 0) {
+          setVoice(
+            s.defaultVoice?.startsWith("local:")
+              ? s.defaultVoice
+              : lv[0]?.id || "local:auto",
+          );
+        } else {
+          setVoice(s.defaultVoice || v.default || "Kore");
+        }
       })
       .catch(() => {});
     return () => {
@@ -340,6 +353,10 @@ export function BatchAudiobookModal({
   const doneCount = jobs.filter((j) => j.stage === "done").length;
   const overallPct = jobs.length > 0 ? Math.round((doneCount / jobs.length) * 100) : 0;
 
+  const voiceListed =
+    voices.some((v) => v.name === voice) ||
+    localVoices.some((v) => (v.id || v.name) === voice);
+
   return (
     <Modal title="Batch Audiobook Studio" onClose={onClose} wide>
       <div className="space-y-5">
@@ -352,12 +369,27 @@ export function BatchAudiobookModal({
               disabled={running}
               className="h-11 w-full rounded-lg border border-zinc-300 px-2 dark:border-zinc-700 dark:bg-zinc-900"
             >
-              {voices.length === 0 && <option value={voice}>{voice}</option>}
-              {voices.map((v) => (
-                <option key={v.name} value={v.name}>
-                  {v.name} · {v.description}
-                </option>
-              ))}
+              {!voiceListed && <option value={voice}>{voice}</option>}
+              {localVoices.length > 0 && (
+                <optgroup label="Free Local WAV Voices (Offline)">
+                  {localVoices.map((v) => {
+                    const val = v.id || v.name;
+                    return (
+                      <option key={val} value={val}>
+                        {v.name}
+                        {v.description ? ` · ${v.description}` : ""}
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              )}
+              <optgroup label="Gemini Cloud Voices">
+                {voices.map((v) => (
+                  <option key={v.name} value={v.name}>
+                    {v.name} · {v.description}
+                  </option>
+                ))}
+              </optgroup>
             </select>
           </label>
           <label className="block text-sm">
@@ -396,6 +428,11 @@ export function BatchAudiobookModal({
             />
             <span className="font-medium">Auto-download each audiobook when finished</span>
           </label>
+          {(voice.startsWith("local:") || hasApiKey === false) && (
+            <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 sm:col-span-2 dark:bg-emerald-950/40 dark:text-emerald-300">
+              Est. cost: $0.00 (Free Local Synthesis) — runs offline on your machine without cloud API usage.
+            </p>
+          )}
         </div>
 
         <div>

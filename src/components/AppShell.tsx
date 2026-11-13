@@ -117,6 +117,37 @@ export function AppShell({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Handle PWA shortcut query params (?import=1&tab=..., ?batch=1, ?settings=1) on mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    let handled = false;
+
+    if (params.get("import") === "1") {
+      const tab = params.get("tab") ?? undefined;
+      openImport(tab);
+      params.delete("import");
+      params.delete("tab");
+      handled = true;
+    }
+    if (params.get("batch") === "1") {
+      openBatchAudiobook();
+      params.delete("batch");
+      handled = true;
+    }
+    if (params.get("settings") === "1") {
+      openSettings();
+      params.delete("settings");
+      handled = true;
+    }
+
+    if (handled) {
+      const qs = params.toString();
+      const nextUrl = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+      window.history.replaceState(window.history.state, "", nextUrl);
+    }
+  }, [openImport, openBatchAudiobook, openSettings]);
+
   // Global "?" (Shift+/) toggles the shortcuts cheat sheet.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

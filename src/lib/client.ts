@@ -294,14 +294,39 @@ export const api = {
   markFeedItemRead: (itemId: string, isRead = true) =>
     send<{ ok: boolean }>("/api/feeds", "POST", { action: "mark-read", itemId, isRead }),
 
-  voices: () => get<{ voices: VoiceInfo[]; default: string }>("/api/voices"),
+  voices: () =>
+    get<{ voices: VoiceInfo[]; localVoices?: VoiceInfo[]; default: string }>("/api/voices"),
   models: (key?: string) =>
     get<ModelsResponse>(
       `/api/models${key?.trim() ? `?key=${encodeURIComponent(key.trim())}` : ""}`,
     ),
+  health: () =>
+    get<{
+      ok: boolean;
+      status: string;
+      version?: string;
+      engine?: string;
+      time?: string;
+      capabilities?: {
+        localTts: boolean;
+        localTtsEngine: string | null;
+        ollamaOnline: boolean;
+        localLlmOnline: boolean;
+        builtinNlp: boolean;
+        ffmpeg: boolean;
+      };
+    }>("/api/health"),
   settings: () => get<PublicSettings>("/api/settings"),
-  updateSettings: (patch: Record<string, unknown>) =>
-    send<PublicSettings>("/api/settings", "PUT", patch),
+  updateSettings: (patch: {
+    geminiApiKey?: string;
+    defaultVoice?: string;
+    defaultSpeed?: number;
+    ttsModel?: string;
+    textModel?: string;
+    ollamaUrl?: string;
+    localLlmUrl?: string;
+    localTtsUrl?: string;
+  }) => send<PublicSettings>("/api/settings", "PUT", patch),
   cacheStats: () => get<CacheStats>("/api/cache"),
   clearCache: () => send<{ ok: boolean; removed: number; bytes: number }>("/api/cache", "DELETE"),
   importData: (data: unknown) => send<{ ok: boolean; imported: number; skipped: number }>("/api/data/import", "POST", data),

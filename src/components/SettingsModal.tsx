@@ -3,6 +3,7 @@
 import {
   BookOpenText,
   Check,
+  CheckCircle2,
   ChevronDown,
   Eye,
   EyeOff,
@@ -13,6 +14,7 @@ import {
   RefreshCw,
   Search,
   Server,
+  Sparkles,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -25,8 +27,10 @@ import type {
   ModelsResponse,
   PublicSettings,
   SyncStatusDto,
+  VoiceInfo,
 } from "@/lib/types";
-import { VOICE_NAMES } from "@/lib/voices";
+import { APP_VERSION } from "@/lib/version";
+import { GEMINI_VOICES } from "@/lib/voices";
 import { Modal } from "./Modal";
 import { PronunciationModal } from "./PronunciationModal";
 import { ServerBrowserModal } from "./ServerBrowserModal";
@@ -69,9 +73,20 @@ function Badge({
   );
 }
 
+function isFreeModel(model: ModelInfo): boolean {
+  return Boolean(
+    model.free ||
+      (model.provider && model.provider !== "gemini") ||
+      model.id.startsWith("builtin:") ||
+      model.id.startsWith("ollama:") ||
+      model.id.startsWith("local:"),
+  );
+}
+
 function ModelBadges({ model }: { model: ModelInfo }) {
   return (
     <>
+      {isFreeModel(model) && <Badge tone="recommended">(Free)</Badge>}
       {model.isRecommended && <Badge tone="recommended">Recommended</Badge>}
       {model.speed === "fast" && <Badge tone="fast">Fast</Badge>}
       {model.category === "vision" && <Badge tone="muted">Vision</Badge>}
@@ -123,12 +138,49 @@ function ModelSelector({
         `${m.id} ${m.name} ${m.description ?? ""}`.toLowerCase().includes(q),
       )
     : models;
+  const freeFiltered = filtered.filter(isFreeModel);
+  const cloudFiltered = filtered.filter((m) => !isFreeModel(m));
 
   function pick(id: string) {
     onChange(id);
     setCustom(false);
     setOpen(false);
     setQuery("");
+  }
+
+  function renderOption(m: ModelInfo) {
+    return (
+      <button
+        key={m.id}
+        type="button"
+        onClick={() => pick(m.id)}
+        title={m.description ?? m.id}
+        className={`flex w-full items-start justify-between gap-2 px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+          m.id === value ? "bg-emerald-50 dark:bg-emerald-950/40" : ""
+        }`}
+      >
+        <span className="min-w-0">
+          <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-medium">
+            <span className="truncate">{m.name}</span>
+            <ModelBadges model={m} />
+          </span>
+          <span className="block truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+            {m.id}
+          </span>
+          {m.description && (
+            <span className="block truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+              {m.description}
+            </span>
+          )}
+        </span>
+        {m.id === value && (
+          <Check
+            size={15}
+            className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+          />
+        )}
+      </button>
+    );
   }
 
   return (
@@ -216,38 +268,24 @@ function ModelSelector({
                       : `No models match "${query.trim()}".`}
                   </p>
                 ) : (
-                  filtered.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onClick={() => pick(m.id)}
-                      title={m.description ?? m.id}
-                      className={`flex w-full items-start justify-between gap-2 px-3 py-2 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                        m.id === value ? "bg-emerald-50 dark:bg-emerald-950/40" : ""
-                      }`}
-                    >
-                      <span className="min-w-0">
-                        <span className="flex flex-wrap items-center gap-1.5 text-[13px] font-medium">
-                          <span className="truncate">{m.name}</span>
-                          <ModelBadges model={m} />
-                        </span>
-                        <span className="block truncate font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
-                          {m.id}
-                        </span>
-                        {m.description && (
-                          <span className="block truncate text-[11px] text-zinc-500 dark:text-zinc-400">
-                            {m.description}
-                          </span>
-                        )}
-                      </span>
-                      {m.id === value && (
-                        <Check
-                          size={15}
-                          className="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-                        />
-                      )}
-                    </button>
-                  ))
+                  <>
+                    {freeFiltered.length > 0 && (
+                      <div role="group" aria-label="Free & Local / Offline">
+                        <div className="sticky top-0 border-b border-zinc-200 bg-zinc-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-emerald-400">
+                          Free &amp; Local / Offline
+                        </div>
+                        {freeFiltered.map(renderOption)}
+                      </div>
+                    )}
+                    {cloudFiltered.length > 0 && (
+                      <div role="group" aria-label="Gemini Cloud">
+                        <div className="sticky top-0 border-b border-zinc-200 bg-zinc-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                          Gemini Cloud
+                        </div>
+                        {cloudFiltered.map(renderOption)}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
               <p className="border-t border-zinc-200 px-3 py-1.5 text-[11px] text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
@@ -531,6 +569,8 @@ function SyncSection() {
   );
 }
 
+type HealthData = Awaited<ReturnType<typeof api.health>>;
+
 export function SettingsModal({
   onClose,
   onSaved,
@@ -540,6 +580,9 @@ export function SettingsModal({
 }) {
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [stats, setStats] = useState<CacheStats | null>(null);
+  const [health, setHealth] = useState<HealthData | null>(null);
+  const [cloudVoices, setCloudVoices] = useState<VoiceInfo[]>(GEMINI_VOICES);
+  const [localVoices, setLocalVoices] = useState<VoiceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -555,6 +598,11 @@ export function SettingsModal({
   const [speed, setSpeed] = useState(1);
   const [ttsModel, setTtsModel] = useState("");
   const [textModel, setTextModel] = useState("");
+  const [ollamaUrl, setOllamaUrl] = useState("");
+  const [localLlmUrl, setLocalLlmUrl] = useState("");
+  const [localTtsUrl, setLocalTtsUrl] = useState("");
+  const [localServersOpen, setLocalServersOpen] = useState(false);
+  const [redetecting, setRedetecting] = useState(false);
   const [modelLists, setModelLists] = useState<ModelsResponse | null>(null);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -568,8 +616,14 @@ export function SettingsModal({
   useEffect(() => {
     let live = true;
     setModelsLoading(true);
-    Promise.all([api.settings(), api.cacheStats(), api.models()])
-      .then(([s, c, m]) => {
+    Promise.all([
+      api.settings(),
+      api.cacheStats(),
+      api.models(),
+      api.voices().catch(() => null),
+      api.health().catch(() => null),
+    ])
+      .then(([s, c, m, v, h]) => {
         if (!live) return;
         setSettings(s);
         setStats(c);
@@ -577,8 +631,16 @@ export function SettingsModal({
         setSpeed(s.defaultSpeed);
         setTtsModel(s.ttsModel);
         setTextModel(s.textModel);
+        setOllamaUrl(s.ollamaUrl ?? "");
+        setLocalLlmUrl(s.localLlmUrl ?? "");
+        setLocalTtsUrl(s.localTtsUrl ?? "");
         setModelLists(m);
         if (m.error) setModelsError(m.error);
+        if (v) {
+          if (v.voices?.length) setCloudVoices(v.voices);
+          setLocalVoices(v.localVoices ?? []);
+        }
+        if (h) setHealth(h);
         setLoading(false);
         setModelsLoading(false);
       })
@@ -649,20 +711,76 @@ export function SettingsModal({
     }
   }
 
+  async function redetectLocalServers() {
+    setRedetecting(true);
+    setModelsError(null);
+    try {
+      const updated = await api.updateSettings({
+        ollamaUrl,
+        localLlmUrl,
+        localTtsUrl,
+      });
+      setSettings(updated);
+      setOllamaUrl(updated.ollamaUrl);
+      setLocalLlmUrl(updated.localLlmUrl);
+      setLocalTtsUrl(updated.localTtsUrl);
+      const [m, v, h] = await Promise.all([
+        api.models(keyTouched && apiKey.trim() ? apiKey : undefined),
+        api.voices().catch(() => null),
+        api.health().catch(() => null),
+      ]);
+      setModelLists(m);
+      if (m.error) setModelsError(m.error);
+      if (v) {
+        if (v.voices?.length) setCloudVoices(v.voices);
+        setLocalVoices(v.localVoices ?? []);
+      }
+      if (h) setHealth(h);
+      onSaved();
+      toast.success("Local servers re-detected.");
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Failed to re-detect local servers.";
+      toast.error(message);
+    } finally {
+      setRedetecting(false);
+    }
+  }
+
   async function save() {
     setSaving(true);
     setError(null);
     try {
-      const patch: Record<string, unknown> = {
+      const patch: Parameters<typeof api.updateSettings>[0] = {
         defaultVoice: voice,
         defaultSpeed: speed,
         ttsModel,
         textModel,
+        ollamaUrl,
+        localLlmUrl,
+        localTtsUrl,
       };
       if (keyTouched) patch.geminiApiKey = apiKey;
       const s = await api.updateSettings(patch);
       setSettings(s);
+      setOllamaUrl(s.ollamaUrl);
+      setLocalLlmUrl(s.localLlmUrl);
+      setLocalTtsUrl(s.localTtsUrl);
       setKeyTouched(false);
+      const [m, v, h] = await Promise.all([
+        api.models().catch(() => null),
+        api.voices().catch(() => null),
+        api.health().catch(() => null),
+      ]);
+      if (m) {
+        setModelLists(m);
+        if (m.error) setModelsError(m.error);
+      }
+      if (v) {
+        if (v.voices?.length) setCloudVoices(v.voices);
+        setLocalVoices(v.localVoices ?? []);
+      }
+      if (h) setHealth(h);
       setSavedTick(true);
       onSaved();
       setTimeout(() => setSavedTick(false), 2000);
@@ -703,6 +821,20 @@ export function SettingsModal({
     }
   }
 
+  const builtinActive = health?.capabilities?.builtinNlp ?? true;
+  const ollamaOnline =
+    health?.capabilities?.ollamaOnline ?? modelLists?.localStatus?.ollamaOnline ?? false;
+  const localLlmOnline =
+    health?.capabilities?.localLlmOnline ?? modelLists?.localStatus?.localLlmOnline ?? false;
+  const localTtsEngine =
+    health?.capabilities?.localTtsEngine ?? modelLists?.localStatus?.localTtsEngine ?? null;
+  const localTtsActive = Boolean(
+    (health?.capabilities?.localTts ?? Boolean(localTtsEngine)) && localTtsEngine,
+  );
+  const voiceListed =
+    localVoices.some((v) => (v.id || v.name) === voice) ||
+    cloudVoices.some((v) => v.name === voice);
+
   return (
     <Modal title="Settings" onClose={onClose}>
       {loading ? (
@@ -718,7 +850,84 @@ export function SettingsModal({
             </div>
           )}
 
-          <Section title="Gemini API key">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3.5 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} className="text-emerald-600 dark:text-emerald-400" />
+                <h3 className="text-xs font-bold uppercase tracking-wide text-emerald-900 dark:text-emerald-200">
+                  Free Local AI &amp; Speech Status
+                </h3>
+              </div>
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800 dark:bg-emerald-900/70 dark:text-emerald-200">
+                <CheckCircle2 size={11} /> Ready Offline
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-emerald-900/80 dark:text-emerald-200/80">
+              Built-in offline NLP and local speech work out of the box with zero API cost.
+            </p>
+            <div className="mt-2.5 grid grid-cols-2 gap-2 text-xs">
+              <div className="flex items-center justify-between rounded-lg bg-white/80 px-2.5 py-1.5 dark:bg-zinc-900/70">
+                <span className="text-zinc-600 dark:text-zinc-300">Built-in Offline NLP</span>
+                <span className="flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {builtinActive ? "Active" : "Unavailable"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/80 px-2.5 py-1.5 dark:bg-zinc-900/70">
+                <span className="text-zinc-600 dark:text-zinc-300">Local WAV TTS</span>
+                <span
+                  className={`flex items-center gap-1 font-semibold ${
+                    localTtsActive
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : "text-zinc-500 dark:text-zinc-400"
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      localTtsActive ? "bg-emerald-500" : "bg-zinc-400"
+                    }`}
+                  />
+                  {localTtsActive ? localTtsEngine : "Browser only"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/80 px-2.5 py-1.5 dark:bg-zinc-900/70">
+                <span className="text-zinc-600 dark:text-zinc-300">Ollama</span>
+                <span
+                  className={`flex items-center gap-1 font-semibold ${
+                    ollamaOnline
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : "text-zinc-500 dark:text-zinc-400"
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      ollamaOnline ? "bg-emerald-500" : "bg-zinc-400"
+                    }`}
+                  />
+                  {ollamaOnline ? "Online" : "Offline"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-white/80 px-2.5 py-1.5 dark:bg-zinc-900/70">
+                <span className="text-zinc-600 dark:text-zinc-300">Local OpenAI LLM</span>
+                <span
+                  className={`flex items-center gap-1 font-semibold ${
+                    localLlmOnline
+                      ? "text-emerald-700 dark:text-emerald-400"
+                      : "text-zinc-500 dark:text-zinc-400"
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      localLlmOnline ? "bg-emerald-500" : "bg-zinc-400"
+                    }`}
+                  />
+                  {localLlmOnline ? "Online" : "Offline"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <Section title="Gemini API key (optional)">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <KeyRound
@@ -774,13 +983,8 @@ export function SettingsModal({
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {settings?.serverKeyConfigured
                 ? "A server-side GEMINI_API_KEY is configured; a key saved here overrides it. "
-                : "Get a free key at aistudio.google.com/apikey. "}
+                : "Optional — free local NLP and local WAV voices work out of the box. Add a key (free at aistudio.google.com/apikey) only for Gemini cloud voices and multimodal Vision/Audio upgrades. "}
               Saving an empty key clears the override.
-              {!settings?.hasApiKey && (
-                <span className="font-medium text-amber-600 dark:text-amber-400">
-                  {" "}TTS and AI features need a key.
-                </span>
-              )}
             </p>
           </Section>
 
@@ -797,11 +1001,28 @@ export function SettingsModal({
                     className={`${inputCls} min-h-[44px] flex-1`}
                     aria-label="Default voice"
                   >
-                    {VOICE_NAMES.map((v) => (
-                      <option key={v} value={v}>
-                        {v}
-                      </option>
-                    ))}
+                    {!voiceListed && <option value={voice}>{voice}</option>}
+                    {localVoices.length > 0 && (
+                      <optgroup label="Free Local WAV Voices (Offline)">
+                        {localVoices.map((v) => {
+                          const val = v.id || v.name;
+                          return (
+                            <option key={val} value={val}>
+                              {v.name}
+                              {v.description ? ` · ${v.description}` : ""}
+                            </option>
+                          );
+                        })}
+                      </optgroup>
+                    )}
+                    <optgroup label="Gemini Cloud Voices">
+                      {cloudVoices.map((v) => (
+                        <option key={v.name} value={v.name}>
+                          {v.name}
+                          {v.description ? ` · ${v.description}` : ""}
+                        </option>
+                      ))}
+                    </optgroup>
                   </select>
                   <VoicePreviewButton voice={voice} />
                 </div>
@@ -852,13 +1073,13 @@ export function SettingsModal({
                   />
                   {modelLists.live
                     ? `Live from Gemini API (${modelLists.ttsModels.length + modelLists.textModels.length} models)`
-                    : "Curated defaults — fetch with an API key for the live list"}
+                    : "Free local models + curated Gemini defaults"}
                 </span>
               )}
             </div>
             {modelsError && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                Live lookup failed ({modelsError}); showing curated defaults.
+                Live lookup failed ({modelsError}); showing local &amp; curated defaults.
               </p>
             )}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -876,6 +1097,90 @@ export function SettingsModal({
                 models={modelLists?.textModels ?? []}
                 loading={modelsLoading}
               />
+            </div>
+
+            <div className="rounded-lg border border-zinc-200 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setLocalServersOpen((v) => !v)}
+                aria-expanded={localServersOpen}
+                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-900/60"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Server size={14} className="text-zinc-400" />
+                  Local Model Servers (Optional)
+                </span>
+                <ChevronDown
+                  size={15}
+                  className={`text-zinc-400 transition-transform ${localServersOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              {localServersOpen && (
+                <div className="space-y-3 border-t border-zinc-200 p-3 dark:border-zinc-800">
+                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                        Ollama URL
+                      </span>
+                      <input
+                        type="url"
+                        value={ollamaUrl}
+                        onChange={(e) => setOllamaUrl(e.target.value)}
+                        placeholder="http://127.0.0.1:11434"
+                        className={inputCls}
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                        Local OpenAI LLM URL
+                      </span>
+                      <input
+                        type="url"
+                        value={localLlmUrl}
+                        onChange={(e) => setLocalLlmUrl(e.target.value)}
+                        placeholder="http://127.0.0.1:1234/v1"
+                        className={inputCls}
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                        Local TTS URL (Kokoro)
+                      </span>
+                      <input
+                        type="url"
+                        value={localTtsUrl}
+                        onChange={(e) => setLocalTtsUrl(e.target.value)}
+                        placeholder="http://127.0.0.1:8880"
+                        className={inputCls}
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                    </label>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                      Leave defaults or point to custom local ports, then re-detect.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void redetectLocalServers()}
+                      disabled={redetecting}
+                      className="flex items-center gap-1.5 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-800"
+                    >
+                      {redetecting ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <RefreshCw size={13} />
+                      )}
+                      Re-detect Local Servers
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </Section>
 
@@ -1029,7 +1334,7 @@ export function SettingsModal({
             <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-3 sm:flex-row sm:items-center sm:justify-between dark:border-zinc-800 dark:bg-zinc-900/50">
               <div className="space-y-0.5">
                 <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  VoxShelf v1.0.0
+                  VoxShelf v{health?.version || APP_VERSION}
                 </p>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400">
                   Free and open source · Licensed under GNU AGPLv3
