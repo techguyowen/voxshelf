@@ -4,7 +4,7 @@ import { getDocumentDetail, saveDocumentDialogue } from "@/lib/documents";
 import { analyzeDocumentDialogue } from "@/lib/gemini";
 import { apiError, toApiError } from "@/lib/http";
 import type { CharacterVoiceAssignment, DialogueAnalysisResult } from "@/lib/types";
-import { VOICE_NAMES } from "@/lib/voices";
+import { isValidVoice } from "@/lib/voices";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,7 +99,7 @@ export async function PUT(req: NextRequest) {
       // Validate and update character assignments
       updatedCharacters = body.characters.map((c) => ({
         character: c.character.trim(),
-        voice: VOICE_NAMES.includes(c.voice) ? c.voice : detail.voice,
+        voice: isValidVoice(c.voice) ? c.voice : detail.voice,
         gender: c.gender,
       }));
 

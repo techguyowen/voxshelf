@@ -135,6 +135,12 @@ export interface DocumentDetail extends DocumentSummary {
 export interface VoiceInfo {
   name: string;
   description: string;
+  id?: string;
+  source?: "gemini" | "local" | "device";
+  gender?: "male" | "female" | "neutral";
+  engine?: string;
+  free?: boolean;
+  lang?: string;
 }
 
 export interface ModelInfo {
@@ -144,6 +150,8 @@ export interface ModelInfo {
   isRecommended?: boolean;
   category: "tts" | "text" | "vision";
   speed?: "fast" | "standard";
+  provider?: "gemini" | "ollama" | "local-openai" | "builtin" | "local-tts";
+  free?: boolean;
 }
 
 export interface ModelsResponse {
@@ -153,6 +161,14 @@ export interface ModelsResponse {
   live: boolean;
   /** Present when live discovery failed and curated defaults were returned. */
   error?: string;
+  localStatus?: {
+    ollamaOnline: boolean;
+    ollamaUrl: string;
+    localLlmOnline: boolean;
+    localLlmUrl: string;
+    localTtsEngine: string | null;
+    localTtsUrl: string;
+  };
 }
 
 export interface TtsRequest {
@@ -171,6 +187,8 @@ export interface TtsResponse {
   chunks: number;
   cached: boolean;
   voice: string;
+  engine?: string;
+  free?: boolean;
 }
 
 export interface ExtractResult {
@@ -197,6 +215,9 @@ export interface PublicSettings {
   defaultSpeed: number;
   ttsModel: string;
   textModel: string;
+  ollamaUrl: string;
+  localLlmUrl: string;
+  localTtsUrl: string;
 }
 
 export interface CacheStats {

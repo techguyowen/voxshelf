@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { requireAuth } from "@/lib/auth";
 import { toApiError } from "@/lib/http";
-import { resolveApiKey } from "@/lib/settings";
+import { discoverLocalAiServers } from "@/lib/localAi";
+import { detectLocalTtsCapabilities } from "@/lib/localTts";
+import { getLocalLlmUrl, getLocalTtsUrl, getOllamaUrl, resolveApiKey } from "@/lib/settings";
 import type { ModelInfo, ModelsResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -82,12 +84,52 @@ const TEXT_PRESETS: ModelInfo[] = [
   },
 ];
 
-function curatedFallback(error?: string): ModelsResponse {
+async function localModels(hasKey: boolean): Promise<{ tts: ModelInfo[]; text: ModelInfo[]; localStatus: NonNullable<ModelsResponse["localStatus"]> }> {
+  const [ai, ttsCaps] = await Promise.all([
+    discoverLocalAiServers().catch(() => null),
+    detectLocalTtsCapabilities().catch(() => null),
+  ]);
+  const text: ModelInfo[] = [
+    { id: "builtin:voxshelf-nlp", name: "VoxShelf Built-in NLP (Free, Offline)", description: "Zero-dependency offline NLP: summaries, chat, quizzes, podcasts and dialogue without any API key.", category: "text", provider: "builtin", free: true, ...(!hasKey ? { isRecommended: true } : {}) },
+  ];
+  if (ai) {
+    for (const m of ai.ollamaModels) text.push({ id: m.id, name: `Ollama: ${m.name}`, description: "Free local Ollama model.", category: "text", provider: "ollama", free: true });
+    // When Ollama is present and no key, prefer it as recommended over builtin.
+    if (!hasKey && ai.ollamaModels.length) {
+      text[0] = { ...text[0], isRecommended: false };
+      text[1] = { ...text[1], isRecommended: true };
+    }
+    for (const m of ai.localLlmModels) text.push({ id: m.id, name: `Local: ${m.name}`, description: "Free local OpenAI-compatible model.", category: "text", provider: "local-openai", free: true });
+  }
+  const tts: ModelInfo[] = [
+    { id: "local:auto", name: "Local TTS Auto (Free)", description: "Picks the best available free local TTS engine.", category: "tts", provider: "local-tts", free: true },
+  ];
+  if (ttsCaps?.engine) {
+    const engineId = ttsCaps.engine === "kokoro-http" ? "local:kokoro" : `local:${ttsCaps.engine}`;
+    const label = ttsCaps.engine === "kokoro-http" ? "Kokoro (Local)" : ttsCaps.engine === "say" ? "macOS Say (Local)" : ttsCaps.engine === "piper" ? "Piper (Local)" : ttsCaps.engine === "espeak" ? "eSpeak (Local)" : "Windows SAPI (Local)";
+    tts.push({ id: engineId, name: label, description: "Free local TTS engine.", category: "tts", provider: "local-tts", free: true });
+  }
   return {
-    ttsModels: TTS_PRESETS,
-    textModels: TEXT_PRESETS,
+    tts,
+    text,
+    localStatus: {
+      ollamaOnline: Boolean(ai?.ollamaOnline),
+      ollamaUrl: ai?.ollamaUrl ?? getOllamaUrl(),
+      localLlmOnline: Boolean(ai?.localLlmOnline),
+      localLlmUrl: ai?.localLlmUrl ?? getLocalLlmUrl(),
+      localTtsEngine: ttsCaps?.engine ?? null,
+      localTtsUrl: getLocalTtsUrl(),
+    },
+  };
+}
+
+function curatedFallback(error?: string, local?: { tts: ModelInfo[]; text: ModelInfo[]; localStatus: NonNullable<ModelsResponse["localStatus"]> }): ModelsResponse {
+  return {
+    ttsModels: [...(local?.tts ?? []), ...TTS_PRESETS],
+    textModels: [...(local?.text ?? []), ...TEXT_PRESETS],
     live: false,
     ...(error ? { error } : {}),
+    ...(local ? { localStatus: local.localStatus } : {}),
   };
 }
 
@@ -221,8 +263,9 @@ export async function GET(req: NextRequest) {
   try {
     const explicitKey = req.nextUrl.searchParams.get("key");
     const apiKey = resolveApiKey(explicitKey);
+    const local = await localModels(Boolean(apiKey));
     if (!apiKey) {
-      return NextResponse.json(curatedFallback());
+      return NextResponse.json(curatedFallback(undefined, local));
     }
     let live: LiveModel[];
     try {
@@ -230,11 +273,11 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Live model lookup failed.";
-      return NextResponse.json(curatedFallback(msg));
+      return NextResponse.json(curatedFallback(msg, local));
     }
     if (live.length === 0) {
       return NextResponse.json(
-        curatedFallback("The API returned no models."),
+        curatedFallback("The API returned no models.", local),
       );
     }
     const ttsLive: ModelInfo[] = live
@@ -258,9 +301,10 @@ export async function GET(req: NextRequest) {
         speed: speedOf(m.id),
       }));
     return NextResponse.json({
-      ttsModels: mergeWithPresets(ttsLive, TTS_PRESETS, RECOMMENDED_TTS),
-      textModels: mergeWithPresets(textLive, TEXT_PRESETS, RECOMMENDED_TEXT),
+      ttsModels: [...local.tts, ...mergeWithPresets(ttsLive, TTS_PRESETS, RECOMMENDED_TTS)],
+      textModels: [...local.text, ...mergeWithPresets(textLive, TEXT_PRESETS, RECOMMENDED_TEXT)],
       live: true,
+      localStatus: local.localStatus,
     } satisfies ModelsResponse);
   } catch (err) {
     return toApiError(err);

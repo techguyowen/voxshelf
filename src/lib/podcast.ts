@@ -1,16 +1,16 @@
 import { randomUUID } from "crypto";
+import { readFileSync } from "fs";
 import {
+  audioFilePath,
   audioKey,
   concatWavs,
-  parseSampleRateFromMime,
-  pcmToWav,
   wavDurationMs,
 } from "./audio";
-import { saveCachedAudio } from "./audioCache";
+import { getCachedAudio, saveCachedAudio } from "./audioCache";
 import { dbAll, dbGet, dbRun } from "./db";
 import { createDocument } from "./documents";
-import { generatePodcastScript, synthesizeSpeech, type PodcastScript } from "./gemini";
-import { chunkForTts } from "./text";
+import { generatePodcastScript, type PodcastScript } from "./gemini";
+import { synthesizeAndCache } from "./tts";
 import type { PodcastEpisode, PodcastLine } from "./types";
 
 interface PodcastRow {
@@ -82,16 +82,9 @@ export async function generatePodcast(
     Puck: "You are Sam, a curious and witty podcast co-host. Speak conversationally with playful energy.",
   };
   for (const line of script.lines) {
-    const chunks = chunkForTts(line.text);
-    for (const chunk of chunks) {
-      const { pcm, mimeType } = await synthesizeSpeech(
-        chunk,
-        line.voice,
-        styleByVoice[line.voice],
-        opts.key,
-      );
-      wavs.push(pcmToWav(pcm, parseSampleRateFromMime(mimeType)));
-    }
+    const result = await synthesizeAndCache(line.text, line.voice, styleByVoice[line.voice], opts.key);
+    const cached = getCachedAudio(result.hash);
+    wavs.push(readFileSync(cached ? cached.filePath : audioFilePath(result.hash)));
   }
   const wav = concatWavs(wavs);
   const transcript = transcriptText(script);

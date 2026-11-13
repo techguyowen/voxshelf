@@ -55,8 +55,14 @@ export function isDeviceVoiceValue(voice: string): boolean {
   );
 }
 
+export const LOCAL_VOICE_PREFIX = "local:";
+
+export function isLocalVoiceValue(v: string): boolean {
+  return typeof v === "string" && v.startsWith(LOCAL_VOICE_PREFIX) && v.length > LOCAL_VOICE_PREFIX.length;
+}
+
 export function isValidVoice(voice: string): boolean {
-  return VOICE_NAMES.includes(voice) || isDeviceVoiceValue(voice);
+  return VOICE_NAMES.includes(voice) || isDeviceVoiceValue(voice) || isLocalVoiceValue(voice);
 }
 
 export function voiceDescription(name: string): string {

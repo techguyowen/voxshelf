@@ -61,6 +61,32 @@ export function getTextModel(): string {
   );
 }
 
+export const DEFAULT_OLLAMA_URL = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+export const DEFAULT_LOCAL_LLM_URL = process.env.LOCAL_LLM_URL || "http://127.0.0.1:1234/v1";
+export const DEFAULT_LOCAL_TTS_URL = process.env.LOCAL_TTS_URL || "http://127.0.0.1:8880";
+
+export function validateLocalUrl(raw: string, fallback: string): string {
+  const v = (raw || "").trim();
+  if (!v) return fallback;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return fallback;
+    return v.replace(/\/+$/, "");
+  } catch {
+    return fallback;
+  }
+}
+
+export function getOllamaUrl(): string {
+  return validateLocalUrl(getSetting("ollama_url", ""), DEFAULT_OLLAMA_URL);
+}
+export function getLocalLlmUrl(): string {
+  return validateLocalUrl(getSetting("local_llm_url", ""), DEFAULT_LOCAL_LLM_URL);
+}
+export function getLocalTtsUrl(): string {
+  return validateLocalUrl(getSetting("local_tts_url", ""), DEFAULT_LOCAL_TTS_URL);
+}
+
 export function getPublicSettings(): PublicSettings {
   return {
     hasApiKey: Boolean(resolveApiKey()),
@@ -69,5 +95,8 @@ export function getPublicSettings(): PublicSettings {
     defaultSpeed: getDefaultSpeed(),
     ttsModel: getTtsModel(),
     textModel: getTextModel(),
+    ollamaUrl: getOllamaUrl(),
+    localLlmUrl: getLocalLlmUrl(),
+    localTtsUrl: getLocalTtsUrl(),
   };
 }

@@ -1,11 +1,16 @@
 import { GoogleGenAI } from "@google/genai";
 import { getTextModel, getTtsModel, resolveApiKey } from "./settings";
+import { discoverBestLocalLlmModel, localLlmGenerate, parseLlmJson, parseModelId } from "./localAi";
+import { isLocalTtsAvailable, listLocalVoices, mapCloudVoiceToLocal, parseLocalVoiceId } from "./localTts";
+import { analyzeDialogueNlp, chatWithDocNlp, cleanupDictationNlp, cleanupTextNlp, explainSelectionNlp, generateNotesFromTranscriptNlp, generatePodcastScriptNlp, generateQuizNlp, summarizeTextNlp } from "./voxshelfLocalNlp";
+export { resolveApiKey };
 import type {
   AudioNoteMode,
   AudioTranscribeAndNoteResult,
   CharacterVoiceAssignment,
   DialogueAnalysisResult,
   SentenceDialogueTag,
+  VoiceInfo,
 } from "./types";
 import { DEFAULT_VOICE, VOICE_NAMES } from "./voices";
 
@@ -18,7 +23,7 @@ export class GeminiError extends Error {
   }
 }
 
-function ttsModels(): string[] {
+export function ttsModels(): string[] {
   return [
     ...new Set([
       getTtsModel(),
@@ -29,7 +34,7 @@ function ttsModels(): string[] {
   ];
 }
 
-function textModels(): string[] {
+export function textModels(): string[] {
   return [
     ...new Set([
       getTextModel(),
@@ -42,14 +47,14 @@ function textModels(): string[] {
   ];
 }
 
-function transcribeModels(): string[] {
+export function transcribeModels(): string[] {
   return [
     "gemini-3.5-transcribe",
     "gemini-3.8-flash",
   ];
 }
 
-function requireKey(explicit?: string | null): string {
+export function requireKey(explicit?: string | null): string {
   const key = resolveApiKey(explicit);
   if (!key) {
     throw new GeminiError(
@@ -59,6 +64,49 @@ function requireKey(explicit?: string | null): string {
   }
   return key;
 }
+
+async function geminiText(prompt: string, explicitKey?: string | null): Promise<string> {
+  const apiKey = requireKey(explicitKey);
+  const ai = new GoogleGenAI({ apiKey });
+  return tryEach(textModels(), async (model) => {
+    const response = await ai.models.generateContent({ model, contents: prompt });
+    const text = partsText(response);
+    if (!text) throw new GeminiError(`Model ${model} returned empty text.`);
+    return text;
+  });
+}
+
+async function callText(prompt: string, explicitKey: string | null | undefined, nlp: () => string, opts: { json?: boolean } = {}): Promise<string> {
+  const configured = getTextModel();
+  const parsed = parseModelId(configured);
+  if (parsed.kind === "builtin") return nlp();
+  if (parsed.kind === "ollama" || parsed.kind === "local") {
+    try {
+      return await localLlmGenerate(configured, prompt, opts);
+    } catch (err) {
+      console.warn("Local LLM failed, falling back to builtin NLP:", err instanceof Error ? err.message : err);
+      return nlp();
+    }
+  }
+  if (resolveApiKey(explicitKey)) return geminiText(prompt, explicitKey);
+  const discovered = await discoverBestLocalLlmModel().catch(() => null);
+  if (discovered) {
+    try {
+      return await localLlmGenerate(discovered, prompt, opts);
+    } catch (err) {
+      console.warn("Local LLM failed, falling back to builtin NLP:", err instanceof Error ? err.message : err);
+      return nlp();
+    }
+  }
+  return nlp();
+}
+
+function nlpFallbackForPrompt(prompt: string): string {
+  const idx = prompt.lastIndexOf("---");
+  const doc = idx >= 0 ? prompt.slice(idx + 3).trim() : prompt;
+  return summarizeTextNlp("Document", doc || prompt, "short");
+}
+
 
 function partsText(response: { text?: string | null }): string {
   return (response.text ?? "").trim();
@@ -161,14 +209,7 @@ export async function generateText(
   prompt: string,
   explicitKey?: string | null,
 ): Promise<string> {
-  const apiKey = requireKey(explicitKey);
-  const ai = new GoogleGenAI({ apiKey });
-  return tryEach(textModels(), async (model) => {
-    const response = await ai.models.generateContent({ model, contents: prompt });
-    const text = partsText(response);
-    if (!text) throw new GeminiError(`Model ${model} returned empty text.`);
-    return text;
-  });
+  return callText(prompt, explicitKey, () => nlpFallbackForPrompt(prompt));
 }
 
 /** Transcribe recorded speech audio with Gemini's audio understanding. */
@@ -334,6 +375,17 @@ export async function generateNotesFromTranscript(
   mode: AudioNoteMode = "notes",
   explicitKey?: string | null,
 ): Promise<AudioTranscribeAndNoteResult> {
+  const configuredNotes = parseModelId(getTextModel());
+  if (configuredNotes.kind === "builtin") return generateNotesFromTranscriptNlp(transcript, mode);
+  if (configuredNotes.kind === "ollama" || configuredNotes.kind === "local" || !resolveApiKey(explicitKey)) {
+    try {
+      const raw = await callText(`Return ONLY valid JSON with title, transcript, summary, notes, actionItems, keyPoints for this transcript (mode: ${mode}):\n\n${transcript.slice(0, 12000)}`, explicitKey, () => JSON.stringify(generateNotesFromTranscriptNlp(transcript, mode)), { json: true });
+      const parsed = parseLlmJson<Record<string, unknown>>(raw, "object");
+      return normalizeAudioNotes({ ...parsed, transcript: typeof parsed.transcript === "string" && parsed.transcript ? parsed.transcript : transcript });
+    } catch {
+      return generateNotesFromTranscriptNlp(transcript, mode);
+    }
+  }
   const apiKey = requireKey(explicitKey);
   const ai = new GoogleGenAI({ apiKey });
 
@@ -435,8 +487,7 @@ export async function cleanupText(
   text: string,
   explicitKey?: string | null,
 ): Promise<string> {
-  const apiKey = requireKey(explicitKey);
-  const ai = new GoogleGenAI({ apiKey });
+  if (parseModelId(getTextModel()).kind === "builtin") return cleanupTextNlp(text);
   const chunks = splitForCleanup(text);
   const cleaned: string[] = [];
   for (const chunk of chunks) {
@@ -446,13 +497,7 @@ export async function cleanupText(
       "and fix obvious punctuation spacing. Do not summarize, translate, reorder, or add any commentary. " +
       "Return only the cleaned text.\n\n---\n" +
       chunk;
-    const out = await tryEach(textModels(), async (model) => {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-      });
-      return partsText(response);
-    });
+    const out = await callText(prompt, explicitKey, () => cleanupTextNlp(chunk));
     cleaned.push(out || chunk);
   }
   return cleaned.join("\n\n").trim();
@@ -464,18 +509,9 @@ export async function summarizeDocument(
   length: "short" | "detailed" = "short",
   explicitKey?: string | null,
 ): Promise<string> {
-  const apiKey = requireKey(explicitKey);
-  const ai = new GoogleGenAI({ apiKey });
+  if (parseModelId(getTextModel()).kind === "builtin") return summarizeTextNlp(title, text, length);
   const ask = async (prompt: string): Promise<string> =>
-    tryEach(textModels(), async (model) => {
-      const response = await ai.models.generateContent({
-        model,
-        contents: prompt,
-      });
-      const out = partsText(response);
-      if (!out) throw new GeminiError(`Model ${model} returned empty text.`);
-      return out;
-    });
+    callText(prompt, explicitKey, () => summarizeTextNlp(title, text, length));
 
   // Map-reduce for long documents.
   if (text.length > 16000) {
@@ -510,8 +546,7 @@ export async function chatWithDocument(
   question: string,
   explicitKey?: string | null,
 ): Promise<string> {
-  const apiKey = requireKey(explicitKey);
-  const ai = new GoogleGenAI({ apiKey });
+  if (parseModelId(getTextModel()).kind === "builtin") return chatWithDocNlp(title, text, history, question);
   const docExcerpt = text.length > 24000 ? `${text.slice(0, 24000)}\n\n[…document truncated…]` : text;
   const historyBlock = history
     .slice(-12)
@@ -524,12 +559,7 @@ export async function chatWithDocument(
     `Document title: "${title}"\n\n--- DOCUMENT ---\n${docExcerpt}\n--- END ---\n\n` +
     (historyBlock ? `Conversation so far:\n${historyBlock}\n\n` : "") +
     `User question: ${question}\n\nAnswer:`;
-  return tryEach(textModels(), async (model) => {
-    const response = await ai.models.generateContent({ model, contents: prompt });
-    const out = partsText(response);
-    if (!out) throw new GeminiError(`Model ${model} returned empty text.`);
-    return out;
-  });
+  return callText(prompt, explicitKey, () => chatWithDocNlp(title, text, history, question));
 }
 
 export interface GeneratedQuizQuestion {
@@ -586,8 +616,7 @@ export async function generateQuiz(
   text: string,
   explicitKey?: string | null,
 ): Promise<GeneratedQuiz> {
-  const apiKey = requireKey(explicitKey);
-  const ai = new GoogleGenAI({ apiKey });
+  if (parseModelId(getTextModel()).kind === "builtin") return generateQuizNlp(title, text) as GeneratedQuiz;
   const docExcerpt = text.length > 20000 ? `${text.slice(0, 20000)}\n\n[…document truncated…]` : text;
   const prompt =
     `You are a study coach. Based ONLY on the document below, create a JSON object with exactly 5 multiple-choice questions ("questions", each with "question", "options" (exactly 4 strings), "answerIndex" (0-3), "explanation") ` +
@@ -621,16 +650,23 @@ export async function generateQuiz(
     },
     required: ["questions", "flashcards"],
   };
-  return tryEach(textModels(), async (model) => {
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: { responseMimeType: "application/json", responseSchema: schema },
-    } as never);
-    const raw = partsText(response);
-    if (!raw) throw new GeminiError(`Model ${model} returned empty text.`);
-    return normalizeQuiz(JSON.parse(extractJsonObject(raw)) as unknown);
-  });
+  void schema;
+  if (resolveApiKey(explicitKey) && parseModelId(getTextModel()).kind === "gemini") {
+    const apiKey = requireKey(explicitKey);
+    const ai = new GoogleGenAI({ apiKey });
+    return tryEach(textModels(), async (model) => {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: { responseMimeType: "application/json", responseSchema: schema },
+      } as never);
+      const raw = partsText(response);
+      if (!raw) throw new GeminiError(`Model ${model} returned empty text.`);
+      return normalizeQuiz(JSON.parse(extractJsonObject(raw)) as unknown);
+    });
+  }
+  const raw = await callText(prompt, explicitKey, () => JSON.stringify(generateQuizNlp(title, text)), { json: true });
+  try { return normalizeQuiz(parseLlmJson<unknown>(raw, "object")); } catch { return generateQuizNlp(title, text) as GeneratedQuiz; }
 }
 
 export interface PodcastLine {
@@ -650,8 +686,7 @@ export async function generatePodcastScript(
   text: string,
   explicitKey?: string | null,
 ): Promise<PodcastScript> {
-  const apiKey = requireKey(explicitKey);
-  const ai = new GoogleGenAI({ apiKey });
+  if (parseModelId(getTextModel()).kind === "builtin") return generatePodcastScriptNlp(title, text) as PodcastScript;
   const docExcerpt = text.length > 18000 ? `${text.slice(0, 18000)}\n\n[…document truncated…]` : text;
   const prompt =
     `You are a podcast scriptwriter. Turn the document below into a fun, engaging 2-host conversational podcast script ` +
@@ -659,18 +694,8 @@ export async function generatePodcastScript(
     `opening with a hook, covering the key ideas with banter, ending with a sign-off. Each line must be speakable narration ` +
     `(no stage directions, no markdown). Return ONLY valid JSON: {"title": "episode title", "lines": [{"speaker": "Alex"|"Sam", "text": "..."}]}.\n\n` +
     `Document title: "${title}"\n\n--- DOCUMENT ---\n${docExcerpt}\n--- END ---`;
-  return tryEach(textModels(), async (model) => {
-    const response = await ai.models.generateContent({
-      model,
-      contents: prompt,
-      config: { responseMimeType: "application/json" },
-    } as never);
-    const raw = partsText(response);
-    if (!raw) throw new GeminiError(`Model ${model} returned empty text.`);
-    const parsed = JSON.parse(extractJsonObject(raw)) as {
-      title?: unknown;
-      lines?: Array<{ speaker?: unknown; text?: unknown }>;
-    };
+  const parseScript = (raw: string): PodcastScript => {
+    const parsed = parseLlmJson<{ title?: unknown; lines?: Array<{ speaker?: unknown; text?: unknown }> }>(raw, "object");
     if (!parsed || !Array.isArray(parsed.lines) || parsed.lines.length === 0) {
       throw new Error("Model returned an empty podcast script.");
     }
@@ -687,7 +712,19 @@ export async function generatePodcastScript(
       title: typeof parsed.title === "string" && parsed.title.trim() ? parsed.title.trim().slice(0, 160) : `Podcast: ${title}`.slice(0, 160),
       lines,
     };
-  });
+  };
+  if (resolveApiKey(explicitKey) && parseModelId(getTextModel()).kind === "gemini") {
+    const apiKey = requireKey(explicitKey);
+    const ai = new GoogleGenAI({ apiKey });
+    return tryEach(textModels(), async (model) => {
+      const response = await ai.models.generateContent({ model, contents: prompt, config: { responseMimeType: "application/json" } } as never);
+      const raw = partsText(response);
+      if (!raw) throw new GeminiError(`Model ${model} returned empty text.`);
+      return parseScript(raw);
+    });
+  }
+  const raw = await callText(prompt, explicitKey, () => JSON.stringify(generatePodcastScriptNlp(title, text)), { json: true });
+  try { return parseScript(raw); } catch { return generatePodcastScriptNlp(title, text) as PodcastScript; }
 }
 
 /** Cleanup for voice-dictated text: punctuation, capitalization, filler words. */
@@ -695,18 +732,14 @@ export async function cleanupDictation(
   text: string,
   explicitKey?: string | null,
 ): Promise<string> {
-  const apiKey = requireKey(explicitKey);
-  const ai = new GoogleGenAI({ apiKey });
+  if (parseModelId(getTextModel()).kind === "builtin") return cleanupDictationNlp(text);
   const prompt =
     "Clean up the following voice-dictated text for reading and text-to-speech. " +
     "Fix punctuation and capitalization, split run-on sentences, remove filler words (um, uh, like, you know, basically, actually) " +
     "where they add no meaning, but preserve the speaker's words and meaning. " +
     "Do not summarize, reorder, or add commentary. Return only the cleaned text.\n\n---\n" +
     text.slice(0, 12000);
-  return tryEach(textModels(), async (model) => {
-    const response = await ai.models.generateContent({ model, contents: prompt });
-    return partsText(response) || text;
-  });
+  return callText(prompt, explicitKey, () => cleanupDictationNlp(text));
 }
 
 /** Translate a batch of sentences, returning an idx -> translation map. */
@@ -717,6 +750,32 @@ export async function translateSentencesBatch(
 ): Promise<Record<number, string>> {
   const out: Record<number, string> = {};
   if (sentences.length === 0) return out;
+  const configuredModel = getTextModel();
+  const parsedModel = parseModelId(configuredModel);
+  const translatePrompt =
+    `Translate each sentence below into ${targetLanguage} accurately and naturally, preserving meaning, tone, and punctuation. ` +
+    `Return ONLY a valid JSON array of objects with this exact shape: [{"idx": number, "translation": string}]. ` +
+    `Include every input idx exactly once, with no extra commentary.\n\n` +
+    sentences.map((s) => `[${s.idx}] ${s.text}`).join("\n");
+  let localModelId: string | null = null;
+  if (parsedModel.kind === "ollama" || parsedModel.kind === "local") localModelId = configuredModel;
+  else if (parsedModel.kind === "builtin" || !resolveApiKey(overrideKey)) {
+    localModelId = await discoverBestLocalLlmModel().catch(() => null);
+    if (!localModelId) {
+      throw new GeminiError("Translation requires an Ollama local LLM or a Gemini API key. Start Ollama (or a local OpenAI server), choose an ollama:/local: model in Settings, or add a Gemini API key.", 400);
+    }
+  }
+  if (localModelId) {
+    const raw = await localLlmGenerate(localModelId, translatePrompt, { json: true });
+    const parsedArr = parseLlmJson<unknown>(raw, "array");
+    if (Array.isArray(parsedArr)) {
+      for (const entry of parsedArr) {
+        const r = (entry ?? {}) as { idx?: unknown; translation?: unknown };
+        if (typeof r.idx === "number" && typeof r.translation === "string") out[r.idx] = r.translation;
+      }
+    }
+    return out;
+  }
   const apiKey = requireKey(overrideKey);
   const ai = new GoogleGenAI({ apiKey });
   const prompt =
@@ -756,7 +815,8 @@ export async function explainSelection(
     "plus a simple definition. If it is a name or term, give one line of background. No preamble, no headers.\n\n" +
     `Selected: "${selection}"\n` +
     (context ? `Surrounding text: "${context.slice(0, 1200)}"` : "");
-  return generateText(prompt, explicitKey);
+  if (parseModelId(getTextModel()).kind === "builtin") return explainSelectionNlp(selection, context);
+  return callText(prompt, explicitKey, () => explainSelectionNlp(selection, context));
 }
 
 const FEMALE_VOICES = [
@@ -817,6 +877,42 @@ export async function analyzeDocumentDialogue(
     };
   }
 
+  const configuredDialogue = parseModelId(getTextModel());
+  const ttsModel = getTtsModel();
+  const localAvailable = await isLocalTtsAvailable().catch(() => false);
+  const wantsLocalVoices =
+    localAvailable &&
+    (defaultVoice.startsWith("local:") ||
+      ttsModel.startsWith("local:") ||
+      !resolveApiKey(explicitKey));
+  if (configuredDialogue.kind !== "gemini" || !resolveApiKey(explicitKey)) {
+    if (configuredDialogue.kind === "ollama" || configuredDialogue.kind === "local") {
+      try {
+        await localLlmGenerate(getTextModel(), `Identify speakers in "${title}" and return JSON.`, { json: true });
+      } catch (err) {
+        console.warn("Local LLM dialogue analysis failed, falling back to builtin NLP:", err instanceof Error ? err.message : err);
+      }
+    }
+    let localCandidates: Array<{ id: string; gender?: "male" | "female" | "neutral"; lang?: string }> | undefined;
+    let narrator = validDefaultVoice;
+    if (wantsLocalVoices) {
+      const prefEngine = ttsModel.startsWith("local:")
+        ? parseLocalVoiceId(ttsModel)?.engine
+        : undefined;
+      const voices = await listLocalVoices();
+      const concrete = voices.filter((v): v is VoiceInfo & { id: string } => Boolean(v.id && v.id !== "local:auto"));
+      const byEngine =
+        prefEngine && prefEngine !== "auto"
+          ? concrete.filter((v) => v.engine === prefEngine)
+          : [];
+      const usable = byEngine.length > 0 ? byEngine : concrete;
+      localCandidates = usable.map((v) => ({ id: v.id, gender: v.gender, lang: v.lang }));
+      narrator = defaultVoice.startsWith("local:") && usable.some((v) => v.id === defaultVoice)
+        ? defaultVoice
+        : await mapCloudVoiceToLocal(validDefaultVoice, prefEngine).catch(() => validDefaultVoice);
+    }
+    return analyzeDialogueNlp(title, sentences, narrator, wantsLocalVoices, localCandidates);
+  }
   const apiKey = requireKey(explicitKey);
   const ai = new GoogleGenAI({ apiKey });
 
@@ -1047,6 +1143,17 @@ export async function analyzeDocumentDialogue(
     };
   });
 
+  if (wantsLocalVoices) {
+    const mapped = new Map<string, string>();
+    for (const c of characters) {
+      mapped.set(c.character, c.voice.startsWith("local:") ? c.voice : await mapCloudVoiceToLocal(c.voice).catch(() => c.voice));
+    }
+    return {
+      characters: characters.map((c) => ({ ...c, voice: mapped.get(c.character) ?? c.voice })),
+      tags: tags.map((t) => ({ ...t, voice: mapped.get(t.character) ?? t.voice })),
+      enabled: true,
+    };
+  }
   return {
     characters,
     tags,

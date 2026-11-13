@@ -1,35 +1,50 @@
-import { readFileSync } from "fs";
-import { join } from "path";
+import { spawnSync } from "child_process";
 import { NextResponse } from "next/server";
 import { dbEngine, getDb } from "@/lib/db";
+import { discoverLocalAiServers } from "@/lib/localAi";
+import { detectLocalTtsCapabilities } from "@/lib/localTts";
+import { APP_VERSION } from "@/lib/version";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function appVersion(): string {
+let ffmpegCache: { at: number; value: boolean } | null = null;
+function ffmpegAvailable(): boolean {
+  if (ffmpegCache && Date.now() - ffmpegCache.at < 30000) return ffmpegCache.value;
+  let value = false;
   try {
-    const pkg = JSON.parse(
-      readFileSync(join(process.cwd(), "package.json"), "utf-8"),
-    ) as { version?: string };
-    return pkg.version || "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
+    const r = spawnSync("ffmpeg", ["-version"], { stdio: "ignore", timeout: 800 });
+    value = !r.error && r.status === 0;
+  } catch { value = false; }
+  ffmpegCache = { at: Date.now(), value };
+  return value;
 }
 
-/** GET /api/health — liveness probe for Docker / load balancers. */
 export async function GET() {
   try {
     getDb().prepare("SELECT 1").get();
+    const [ttsCaps, ai] = await Promise.all([
+      detectLocalTtsCapabilities().catch(() => null),
+      discoverLocalAiServers().catch(() => null),
+    ]);
     return NextResponse.json({
       ok: true,
-      version: appVersion(),
+      status: "ok",
+      version: APP_VERSION,
       engine: dbEngine(),
       time: new Date().toISOString(),
+      capabilities: {
+        localTts: Boolean(ttsCaps?.available),
+        localTtsEngine: ttsCaps?.engine ?? null,
+        ollamaOnline: Boolean(ai?.ollamaOnline),
+        localLlmOnline: Boolean(ai?.localLlmOnline),
+        builtinNlp: true,
+        ffmpeg: ffmpegAvailable(),
+      },
     });
   } catch (err) {
     return NextResponse.json(
-      { ok: false, error: err instanceof Error ? err.message : "DB unavailable" },
+      { ok: false, status: "error", version: APP_VERSION, error: err instanceof Error ? err.message : "DB unavailable" },
       { status: 503 },
     );
   }

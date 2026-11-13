@@ -1,10 +1,11 @@
 import { createHash } from "crypto";
 import { AUDIO_DIR } from "./paths";
+import { normalizeToWav24kMono, TARGET_SAMPLE_RATE } from "./audioResample";
 import path from "path";
 
 export function audioKey(text: string, voice: string, style: string): string {
   return createHash("sha256")
-    .update(JSON.stringify({ v: 2, text, voice, style: style || "" }))
+    .update(JSON.stringify({ v: 3, text, voice, style: style || "" }))
     .digest("hex");
 }
 
@@ -145,12 +146,34 @@ export function pcmToWav(
   return Buffer.concat([header, pcm]);
 }
 
-/** Concatenate same-format WAV buffers into a single WAV. */
+/** Concatenate WAV buffers into a single WAV, normalizing mismatched formats to 24kHz mono. */
 export function concatWavs(wavs: Buffer[]): Buffer {
   if (wavs.length === 0) throw new Error("Nothing to concatenate");
   if (wavs.length === 1) return wavs[0];
   const first = parseWavHeader(wavs[0]);
   if (!first) throw new Error("Invalid WAV data");
+  const needsNormalize = (info: { sampleRate: number; channels: number; bitsPerSample: number } | null): boolean =>
+    !info || info.sampleRate !== TARGET_SAMPLE_RATE || info.channels !== 1 || info.bitsPerSample !== 16;
+  const anyMismatch =
+    needsNormalize(first) ||
+    wavs.some((w) => {
+      const info = parseWavHeader(w);
+      return !info || info.sampleRate !== first.sampleRate || info.channels !== first.channels || info.bitsPerSample !== first.bitsPerSample;
+    });
+  if (anyMismatch) {
+    const normalized = wavs.map((w) => {
+      const info = parseWavHeader(w);
+      if (!info) throw new Error("Invalid WAV data in batch");
+      return needsNormalize(info) ? normalizeToWav24kMono(w, info.sampleRate) : w;
+    });
+    const pcmParts: Buffer[] = [];
+    for (const wav of normalized) {
+      const info = parseWavHeader(wav);
+      if (!info) throw new Error("Invalid WAV data in batch");
+      pcmParts.push(wav.subarray(info.headerSize, info.headerSize + info.dataSize));
+    }
+    return pcmToWav(Buffer.concat(pcmParts), TARGET_SAMPLE_RATE, 1, 16);
+  }
   const pcmParts: Buffer[] = [];
   for (const wav of wavs) {
     const info = parseWavHeader(wav);

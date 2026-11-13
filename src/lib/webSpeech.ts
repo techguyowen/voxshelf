@@ -100,6 +100,34 @@ export function pickDefaultDeviceVoice(
   return toDeviceVoiceValue(voices[0].name);
 }
 
+const NOVELTY_WEB = new Set(["Albert","Bad News","Bahh","Bells","Boing","Bubbles","Cellos","Good News","Jester","Organ","Trinoids","Whisper","Wobble","Zarvox","Fred","Junior","Ralph","Kathy"]);
+export function rankWebSpeechVoices(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice[] {
+  const docLang = typeof document !== "undefined" ? document.documentElement.lang || "" : "";
+  const navLang = typeof navigator !== "undefined" ? navigator.language || "" : "";
+  const preferred = (docLang || navLang || "en").toLowerCase();
+  const prefShort = preferred.slice(0, 2);
+  const score = (v: SpeechSynthesisVoice): number => {
+    let sc = 0;
+    const name = v.name || "";
+    if (NOVELTY_WEB.has(name)) sc -= 100;
+    if (/Natural/i.test(name)) sc += 50;
+    if (/Neural/i.test(name)) sc += 48;
+    if (/Enhanced/i.test(name)) sc += 44;
+    if (/Premium/i.test(name)) sc += 46;
+    if (/Siri/i.test(name)) sc += 42;
+    if (/Online/i.test(name)) sc += 30;
+    if (v.lang && v.lang.toLowerCase() === preferred) sc += 40;
+    else if (v.lang && v.lang.slice(0, 2).toLowerCase() === prefShort) sc += 25;
+    if (v.default) sc += 15;
+    if (v.localService) sc += 2;
+    return sc;
+  };
+  return [...voices].sort((a, b) => score(b) - score(a));
+}
+export async function getRankedWebSpeechVoices(): Promise<SpeechSynthesisVoice[]> {
+  return rankWebSpeechVoices(await getWebSpeechVoices());
+}
+
 /** Resolve the default device voice value, loading voices if needed. */
 export async function getDefaultDeviceVoice(): Promise<string | null> {
   return pickDefaultDeviceVoice(await getWebSpeechVoices());
@@ -148,6 +176,22 @@ function clampVolume(volume: number): number {
  */
 export class WebSpeechPlayer {
   private generation = 0;
+  private stallTimer: ReturnType<typeof setInterval> | null = null;
+  private userPaused = false;
+  private clearWatchdog(): void {
+    if (this.stallTimer) { clearInterval(this.stallTimer); this.stallTimer = null; }
+  }
+  private startWatchdog(): void {
+    this.clearWatchdog();
+    if (!isWebSpeechSupported()) return;
+    this.stallTimer = setInterval(() => {
+      if (this.userPaused) return;
+      try {
+        const synth = window.speechSynthesis;
+        if (synth.speaking && !synth.paused) { synth.pause(); synth.resume(); }
+      } catch { /* ignore */ }
+    }, 11000);
+  }
   // Chromium can GC a locally-scoped utterance mid-speech, cutting audio
   // off early. Holding a strong reference until end/error/cancel prevents it.
   private activeUtterance: SpeechSynthesisUtterance | null = null;
@@ -167,6 +211,8 @@ export class WebSpeechPlayer {
     }
     const synth = window.speechSynthesis;
     const gen = ++this.generation;
+    this.userPaused = false;
+    this.clearWatchdog();
     try {
       synth.cancel();
     } catch {
@@ -188,11 +234,13 @@ export class WebSpeechPlayer {
     };
     utterance.onend = () => {
       if (gen !== this.generation) return;
+      this.clearWatchdog();
       this.activeUtterance = null;
       callbacks.onEnd?.();
     };
     utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
       if (gen !== this.generation) return;
+      this.clearWatchdog();
       this.activeUtterance = null;
       callbacks.onError?.(
         new Error(`On-device speech failed (${event.error}).`),
@@ -202,13 +250,17 @@ export class WebSpeechPlayer {
     this.activeUtterance = utterance;
     try {
       synth.speak(utterance);
+      this.startWatchdog();
     } catch (err) {
+      this.clearWatchdog();
       this.activeUtterance = null;
       callbacks.onError?.(err);
     }
   }
 
   pause(): void {
+    this.userPaused = true;
+    this.clearWatchdog();
     if (!isWebSpeechSupported()) return;
     try {
       window.speechSynthesis.pause();
@@ -218,9 +270,11 @@ export class WebSpeechPlayer {
   }
 
   resume(): void {
+    this.userPaused = false;
     if (!isWebSpeechSupported()) return;
     try {
       window.speechSynthesis.resume();
+      this.startWatchdog();
     } catch {
       // ignore
     }
@@ -228,6 +282,8 @@ export class WebSpeechPlayer {
 
   cancel(): void {
     this.generation += 1;
+    this.userPaused = false;
+    this.clearWatchdog();
     this.activeUtterance = null;
     if (!isWebSpeechSupported()) return;
     try {
