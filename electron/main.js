@@ -5,15 +5,90 @@
 // Dev: run `npm run dev` first, then `electron .` (assumes the dev server on
 // port 48291, or set ELECTRON_START_URL to override).
 
-const { app, BrowserWindow, Menu, dialog, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } = require("electron");
 const fs = require("fs");
+const http = require("http");
 const net = require("net");
+const os = require("os");
 const path = require("path");
 
 const DEFAULT_PORT = 48291;
 const APP_NAME = "VoxShelf";
 
+app.setName(APP_NAME);
+
 if (!app.requestSingleInstanceLock()) app.quit();
+
+let serverInstance = null;
+let serverChild = null;
+
+/** Ensure GUI/Finder launches resolve Homebrew, user, and system binaries. */
+function augmentPath() {
+  const home = os.homedir();
+  const extra =
+    process.platform === "win32"
+      ? [
+          path.join(process.env.ProgramFiles || "C:\\Program Files", "ffmpeg", "bin"),
+          path.join(process.env.ProgramFiles || "C:\\Program Files", "eSpeak NG"),
+          path.join(
+            process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+            "eSpeak NG",
+          ),
+          path.join(
+            process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"),
+            "Programs",
+            "Ollama",
+          ),
+          path.join(
+            process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"),
+            "Programs",
+            "piper",
+          ),
+          path.join(
+            process.env.LOCALAPPDATA || path.join(home, "AppData", "Local"),
+            "Microsoft",
+            "WinGet",
+            "Links",
+          ),
+          "C:\\ProgramData\\chocolatey\\bin",
+          path.join(home, "scoop", "shims"),
+          path.join(home, ".local", "bin"),
+          path.join(home, ".cargo", "bin"),
+        ].filter((p) => fs.existsSync(p))
+      : [
+          "/opt/homebrew/bin",
+          "/opt/homebrew/sbin",
+          "/usr/local/bin",
+          "/usr/bin",
+          "/bin",
+          "/usr/sbin",
+          "/sbin",
+          path.join(home, ".local", "bin"),
+          path.join(home, ".cargo", "bin"),
+        ];
+  const current = (process.env.PATH || "").split(path.delimiter).filter(Boolean);
+  process.env.PATH = [...new Set([...extra, ...current])].join(path.delimiter);
+}
+
+function stopServer() {
+  if (serverInstance) {
+    try {
+      serverInstance.closeAllConnections?.();
+      serverInstance.close();
+    } catch {
+      // Ignore shutdown errors.
+    }
+    serverInstance = null;
+  }
+  if (serverChild) {
+    try {
+      serverChild.kill("SIGTERM");
+    } catch {
+      // Ignore shutdown errors.
+    }
+    serverChild = null;
+  }
+}
 
 function devStartUrl() {
   if (process.env.ELECTRON_START_URL) return process.env.ELECTRON_START_URL;
@@ -117,7 +192,17 @@ async function bootServer() {
     process.env.DATA_DIR = dataDir;
   }
   process.chdir(dir);
-  require(entry);
+  const origCreateServer = http.createServer;
+  http.createServer = function (...args) {
+    const srv = origCreateServer.apply(this, args);
+    serverInstance = srv;
+    return srv;
+  };
+  try {
+    require(entry);
+  } finally {
+    http.createServer = origCreateServer;
+  }
   const base = `http://127.0.0.1:${port}`;
   await waitForHealth(`${base}/api/health`);
   logStartup(`server is healthy at ${base}`);
@@ -197,7 +282,7 @@ function createWindow(url) {
     minWidth: 360,
     minHeight: 600,
     title: APP_NAME,
-    backgroundColor: "#ffffff",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#0b0d12" : "#ffffff",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -233,6 +318,14 @@ function createWindow(url) {
 
 async function start() {
   await app.whenReady();
+  augmentPath();
+  ipcMain.on("voxshelf:meta", (e) => {
+    e.returnValue = {
+      isDesktop: true,
+      platform: process.platform,
+      version: app.getVersion(),
+    };
+  });
   buildMenu();
   try {
     const url = devStartUrl() || (await bootServer());
@@ -241,9 +334,14 @@ async function start() {
     const message = err instanceof Error ? err.message : String(err);
     logStartup(`startup failed: ${message}`);
     dialog.showErrorBox(`${APP_NAME} failed to start`, message);
+    stopServer();
     app.quit();
   }
 }
+
+app.on("before-quit", () => {
+  stopServer();
+});
 
 app.on("second-instance", () => {
   if (mainWindow) {

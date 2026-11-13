@@ -36,8 +36,8 @@ COPY --from=builder /app/package.json ./package.json
 
 RUN mkdir -p /app/data && chown nextjs:nodejs /app/data
 
-# Native .m4b chapterized audiobook exports (audiobookExport.ts shells to ffmpeg).
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+# Native .m4b chapterized audiobook exports (audiobookExport.ts shells to ffmpeg) and offline speech synthesis (espeak-ng).
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg espeak-ng espeak-ng-data ca-certificates && rm -rf /var/lib/apt/lists/*
 
 USER nextjs
 

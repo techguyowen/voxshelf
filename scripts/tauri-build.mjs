@@ -2,13 +2,42 @@
 // Usage: node scripts/tauri-build.mjs [cargo tauri build args...]
 
 import { spawnSync } from "child_process";
-import { cpSync, copyFileSync, existsSync, rmSync } from "fs";
+import { cpSync, copyFileSync, existsSync, readFileSync, rmSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const standalone = join(root, ".next", "standalone");
 const resources = join(root, "src-tauri", "resources", "standalone");
+
+function checkVersionParity() {
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    const tauriConf = JSON.parse(
+      readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8"),
+    );
+    const cargoToml = readFileSync(join(root, "src-tauri", "Cargo.toml"), "utf8");
+    const pkgSection = /\[package\]([\s\S]*?)(?:\n\[|$)/.exec(cargoToml)?.[1] ?? cargoToml;
+    const cargoVersion = /^\s*version\s*=\s*"([^"]+)"/m.exec(pkgSection)?.[1] ?? null;
+
+    if (tauriConf.version !== pkg.version) {
+      console.warn(
+        `[tauri-build] WARNING: src-tauri/tauri.conf.json version (${tauriConf.version}) drifts from package.json (${pkg.version})`,
+      );
+    }
+    if (cargoVersion !== pkg.version) {
+      console.warn(
+        `[tauri-build] WARNING: src-tauri/Cargo.toml version (${cargoVersion ?? "unknown"}) drifts from package.json (${pkg.version})`,
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[tauri-build] WARNING: could not verify version parity: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+checkVersionParity();
 
 function run(cmd, args) {
   const r = spawnSync(cmd, args, { cwd: root, stdio: "inherit", shell: process.platform === "win32" });

@@ -1,6 +1,6 @@
 // Desktop packager: next build -> stage standalone server -> electron-builder.
-// Usage: node scripts/electron-build.mjs [--mac|--win|--linux] [--x64] [--arm64]
-// (default: current platform + host arch). Never publishes; CI uploads artifacts.
+// Usage: node scripts/electron-build.mjs [--mac|--win|--linux] [--x64] [--arm64] [electron-builder args...]
+// (default: current platform + host arch). Never publishes unless overridden; CI uploads artifacts.
 
 import { spawnSync } from "child_process";
 import { cpSync, copyFileSync, existsSync } from "fs";
@@ -35,8 +35,15 @@ if (!existsSync(join(standalone, "server.js"))) {
   process.exit(1);
 }
 
-const arches = process.argv.filter((a) => ["--x64", "--arm64"].includes(a));
-console.log(`==> electron-builder ${want} ${arches.join(" ")}`.trim());
+const rawArgs = process.argv.slice(2);
+const hasPlatform = rawArgs.some((a) => ["--mac", "--win", "--linux", "-m", "-w", "-l"].includes(a));
+const hasPublish = rawArgs.some((a) => a === "--publish" || a.startsWith("--publish=") || a === "-p");
+const builderArgs = [
+  ...(hasPlatform ? [] : [want]),
+  ...rawArgs,
+  ...(hasPublish ? [] : ["--publish", "never"]),
+];
+console.log(`==> electron-builder ${builderArgs.join(" ")}`.trim());
 const builder = join(root, "node_modules", ".bin", process.platform === "win32" ? "electron-builder.cmd" : "electron-builder");
-run(builder, [want, ...arches, "--publish", "never"]);
+run(builder, builderArgs);
 console.log("done — installers are in dist/");
